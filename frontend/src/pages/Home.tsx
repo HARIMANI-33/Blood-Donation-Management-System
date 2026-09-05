@@ -1,26 +1,73 @@
-import { Droplet, Heart, ShieldCheck } from 'lucide-react';
+import { Droplet, Heart, ShieldCheck, Users, Clock, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const Home = () => {
   return (
     <div className="home-container">
+      {/* Hero Section */}
       <section className="hero-section">
+        <div className="hero-badge">
+          <Heart size={14} />
+          <span>Every Drop Counts</span>
+        </div>
+
         <h1 className="hero-title">
-          Blood Bank Management & Real-Time Inventory
+          Find Blood. Donate Blood.
+          <span className="hero-title-accent"> Save Lives.</span>
         </h1>
+
         <p className="hero-subtitle">
-          A professional healthcare solution for monitoring blood stock, managing donors, and ensuring rapid response during emergencies.
+          A modern healthcare platform connecting blood donors with those in need.
+          Join thousands of heroes making a difference every day.
         </p>
+
         <div className="hero-actions">
-          <Link to="/register" className="btn-primary">
-            Become a Donor
+          <Link to="/register" className="cta-card cta-card-primary" id="cta-become-donor">
+            <div className="cta-icon-wrap cta-icon-primary">
+              <Heart size={28} />
+            </div>
+            <span className="cta-label">Become a Donor</span>
+            <span className="cta-desc">Register and start saving lives today</span>
           </Link>
-          <Link to="/dashboard" className="btn-secondary">
-            View Inventory
+
+          <Link to="/dashboard" className="cta-card cta-card-secondary" id="cta-view-inventory">
+            <div className="cta-icon-wrap cta-icon-secondary">
+              <Droplet size={28} />
+            </div>
+            <span className="cta-label">View Inventory</span>
+            <span className="cta-desc">Check real-time blood stock levels</span>
           </Link>
         </div>
       </section>
 
+      {/* Stats Section */}
+      <section className="stats-section">
+        <div className="stat-item">
+          <Users size={20} />
+          <div>
+            <span className="stat-number">10,000+</span>
+            <span className="stat-label">Registered Donors</span>
+          </div>
+        </div>
+        <div className="stat-divider" />
+        <div className="stat-item">
+          <Clock size={20} />
+          <div>
+            <span className="stat-number">24/7</span>
+            <span className="stat-label">Availability</span>
+          </div>
+        </div>
+        <div className="stat-divider" />
+        <div className="stat-item">
+          <TrendingUp size={20} />
+          <div>
+            <span className="stat-number">50+</span>
+            <span className="stat-label">Partner Hospitals</span>
+          </div>
+        </div>
+      </section>
+
+      {/* Features Section */}
       <section className="features-section">
         <div className="feature-card">
           <div className="feature-icon">

@@ -10,6 +10,7 @@ export interface User {
   password_hash: string;
   phone: string | null;
   blood_group: BloodGroup | null;
+  city: string | null;
   role: UserRole;
   created_at: string;
   updated_at: string;
@@ -21,6 +22,7 @@ export interface CreateUserInput {
   passwordHash: string;
   phone?: string | null;
   bloodGroup?: BloodGroup | null;
+  city?: string | null;
   role?: UserRole;
 }
 
@@ -45,8 +47,8 @@ export const findUserById = async (id: string): Promise<User | null> => {
  */
 export const createUser = async (input: CreateUserInput): Promise<User> => {
   const result = await query(
-    `INSERT INTO users (name, email, password_hash, phone, blood_group, role)
-     VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'donor'))
+    `INSERT INTO users (name, email, password_hash, phone, blood_group, city, role)
+     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 'donor'))
      RETURNING *`,
     [
       input.name,
@@ -54,6 +56,7 @@ export const createUser = async (input: CreateUserInput): Promise<User> => {
       input.passwordHash,
       input.phone ?? null,
       input.bloodGroup ?? null,
+      input.city ? input.city.trim() : null,
       input.role ?? null
     ]
   );
@@ -82,6 +85,56 @@ export const getTotalUserCount = async (): Promise<number> => {
   return result.rows[0]?.count ?? 0;
 };
 
+export interface UpdateUserProfileInput {
+  name?: string;
+  phone?: string | null;
+  bloodGroup?: BloodGroup | null;
+  city?: string | null;
+}
+
+/**
+ * Update a user's editable profile fields (name, phone, blood group, city).
+ */
+export const updateUserProfile = async (id: string, input: UpdateUserProfileInput): Promise<User | null> => {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  let paramIndex = 1;
+
+  if (input.name !== undefined) {
+    fields.push(`name = $${paramIndex++}`);
+    values.push(input.name.trim());
+  }
+  if (input.phone !== undefined) {
+    fields.push(`phone = $${paramIndex++}`);
+    values.push(input.phone ? input.phone.trim() : null);
+  }
+  if (input.bloodGroup !== undefined) {
+    fields.push(`blood_group = $${paramIndex++}`);
+    values.push(input.bloodGroup ?? null);
+  }
+  if (input.city !== undefined) {
+    fields.push(`city = $${paramIndex++}`);
+    values.push(input.city ? input.city.trim() : null);
+  }
+
+  if (fields.length === 0) {
+    return findUserById(id);
+  }
+
+  fields.push(`updated_at = now()`);
+  values.push(id);
+
+  const sql = `
+    UPDATE users
+    SET ${fields.join(', ')}
+    WHERE id = $${paramIndex}
+    RETURNING *
+  `;
+
+  const result = await query(sql, values);
+  return result.rows[0] ?? null;
+};
+
 /**
  * Strip the password hash before sending a user object to the client.
  */
@@ -91,6 +144,8 @@ export const toPublicUser = (user: User) => ({
   email: user.email,
   phone: user.phone,
   bloodGroup: user.blood_group,
+  city: user.city,
   role: user.role,
   createdAt: user.created_at
 });
+

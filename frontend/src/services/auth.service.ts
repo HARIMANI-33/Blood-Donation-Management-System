@@ -9,3 +9,11 @@ export const loginUser = (input: LoginInput): Promise<AuthResponse> =>
 
 export const fetchDashboardStats = (token: string): Promise<{ success: boolean; data: DashboardStats }> =>
   apiRequest('/dashboard/stats', { token });
+
+export const googleAuthUser = (payload: {
+  token?: string;
+  credential?: string;
+  accessToken?: string;
+  access_token?: string;
+}): Promise<AuthResponse> =>
+  apiRequest<AuthResponse>('/auth/google', { method: 'POST', body: payload });

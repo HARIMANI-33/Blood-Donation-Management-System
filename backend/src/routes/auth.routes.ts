@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, login, me } from '../controllers/auth.controller';
+import { register, login, me, googleAuth } from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();
@@ -10,7 +10,11 @@ router.post('/register', register);
 // POST /api/auth/login
 router.post('/login', login);
 
+// POST /api/auth/google
+router.post('/google', googleAuth);
+
 // GET /api/auth/me
 router.get('/me', authenticate, me);
 
 export default router;
+

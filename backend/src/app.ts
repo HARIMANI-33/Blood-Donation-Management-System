@@ -32,11 +32,14 @@ app.use(notFoundHandler);
 // Global Error Handling Middleware
 app.use(errorHandler);
 
+import { initDatabase } from './config/initDb';
+
 // Start server
 const PORT = config.port;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`[Server] Blood Bank API is running on http://localhost:${PORT}`);
   console.log(`[Server] Environment: ${config.nodeEnv}`);
+  await initDatabase();
 });
 
 export default app;

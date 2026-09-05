@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import type { User, LoginInput, RegisterInput } from '../types/auth';
-import { loginUser, registerUser } from '../services/auth.service';
+import { loginUser, registerUser, googleAuthUser } from '../services/auth.service';
 import { ApiError } from '../services/api';
 
 interface AuthContextValue {
@@ -8,8 +8,11 @@ interface AuthContextValue {
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isNewRegistration: boolean;
   login: (input: LoginInput) => Promise<void>;
   register: (input: RegisterInput) => Promise<void>;
+  googleLogin: (payload: { token?: string; credential?: string; accessToken?: string; access_token?: string }) => Promise<void>;
+  updateUser: (updatedUser: User) => void;
   logout: () => void;
 }
 
@@ -26,6 +29,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isNewRegistration, setIsNewRegistration] = useState<boolean>(() => {
+    return sessionStorage.getItem('lifeflow_is_new_reg') === 'true';
+  });
 
   useEffect(() => {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -52,6 +58,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!response.data) {
       throw new ApiError(response.message || 'Login failed', 400);
     }
+    setIsNewRegistration(false);
+    sessionStorage.removeItem('lifeflow_is_new_reg');
     persist(response.data.user, response.data.token);
   }, []);
 
@@ -60,18 +68,56 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!response.data) {
       throw new ApiError(response.message || 'Registration failed', 400);
     }
+    setIsNewRegistration(true);
+    sessionStorage.setItem('lifeflow_is_new_reg', 'true');
     persist(response.data.user, response.data.token);
+  }, []);
+
+  const googleLogin = useCallback(async (payload: { token?: string; credential?: string; accessToken?: string; access_token?: string }) => {
+    const response = await googleAuthUser(payload);
+    if (!response.data) {
+      throw new ApiError(response.message || 'Google authentication failed', 400);
+    }
+    setIsNewRegistration(false);
+    sessionStorage.removeItem('lifeflow_is_new_reg');
+    persist(response.data.user, response.data.token);
+  }, []);
+
+  const updateUser = useCallback((updatedUser: User) => {
+    setUser(updatedUser);
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      try {
+        const parsed: StoredAuth = JSON.parse(raw);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ user: updatedUser, token: parsed.token }));
+      } catch {
+        // ignore
+      }
+    }
   }, []);
 
   const logout = useCallback(() => {
     setUser(null);
     setToken(null);
+    setIsNewRegistration(false);
+    sessionStorage.removeItem('lifeflow_is_new_reg');
     localStorage.removeItem(STORAGE_KEY);
   }, []);
 
   return (
     <AuthContext.Provider
-      value={{ user, token, isAuthenticated: !!token, isLoading, login, register, logout }}
+      value={{
+        user,
+        token,
+        isAuthenticated: !!token,
+        isLoading,
+        isNewRegistration,
+        login,
+        register,
+        googleLogin,
+        updateUser,
+        logout
+      }}
     >
       {children}
     </AuthContext.Provider>

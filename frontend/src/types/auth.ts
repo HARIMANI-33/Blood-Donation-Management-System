@@ -7,6 +7,7 @@ export interface User {
   email: string;
   phone: string | null;
   bloodGroup: BloodGroup | null;
+  city?: string | null;
   role: UserRole;
   createdAt: string;
 }
@@ -26,6 +27,8 @@ export interface RegisterInput {
   password: string;
   phone?: string;
   bloodGroup?: BloodGroup;
+  city: string;
+  age?: number;
 }
 
 export interface LoginInput {

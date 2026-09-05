@@ -26,3 +26,32 @@ export const authenticate = (req: AuthenticatedRequest, res: Response, next: Nex
     res.status(401).json({ success: false, message: 'Invalid or expired token' });
   }
 };
+
+/**
+ * Role-based authorization middleware.
+ * Ensures the authenticated user has one of the allowed roles.
+ */
+export const requireRole = (...roles: string[]) => {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Authentication required' });
+      return;
+    }
+
+    if (!roles.includes(req.user.role)) {
+      res.status(403).json({
+        success: false,
+        message: `Access denied. Requires one of the following roles: ${roles.join(', ')}`
+      });
+      return;
+    }
+
+    next();
+  };
+};
+
+/**
+ * Middleware ensuring the authenticated user is a donor (or admin).
+ */
+export const requireDonor = requireRole('donor', 'admin');
+
