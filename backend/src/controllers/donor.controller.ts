@@ -145,12 +145,14 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response): P
  */
 export const getBloodBanks = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const search = typeof req.query.search === 'string'
-      ? req.query.search
-      : typeof req.query.city === 'string'
-      ? req.query.city
+    const city = typeof req.query.city === 'string' && req.query.city.trim()
+      ? req.query.city.trim()
       : undefined;
-    const bloodBanks = await findAllBloodBanks(search);
+    const search = typeof req.query.search === 'string' && req.query.search.trim()
+      ? req.query.search.trim()
+      : undefined;
+
+    const bloodBanks = await findAllBloodBanks({ city, search });
     res.status(200).json({
       success: true,
       data: { bloodBanks }
@@ -204,14 +206,40 @@ export const bookAppointment = async (req: AuthenticatedRequest, res: Response):
       const lastDonationDateStr = toIsoDateString(latestDonation.donation_date);
       const eligibleDateStr = addDaysToIsoDate(lastDonationDateStr, WHOLE_BLOOD_WAITING_PERIOD_DAYS);
 
+      const [ty, tm, td] = todayStr.split('-').map(Number);
+      const [ey, em, ed] = eligibleDateStr.split('-').map(Number);
+      const todayMs = new Date(ty, tm - 1, td).getTime();
+      const eligibleMs = new Date(ey, em - 1, ed).getTime();
+      const diffMs = eligibleMs - todayMs;
+      const daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+
+      // If the donor is currently within the recovery period, block appointment creation
+      if (daysRemaining > 0 || todayStr < eligibleDateStr) {
+        res.status(403).json({
+          success: false,
+          message: `Donor is currently ineligible to donate until ${eligibleDateStr}. Please wait until your recovery period is complete.`,
+          data: {
+            isEligible: false,
+            previousDonationDate: lastDonationDateStr,
+            lastDonationDate: lastDonationDateStr,
+            nextEligibleDate: eligibleDateStr,
+            daysRemaining
+          }
+        });
+        return;
+      }
+
+      // Also ensure scheduled appointment date is on or after next eligible date
       if (appointmentDate < eligibleDateStr) {
         res.status(400).json({
           success: false,
           message: `You cannot schedule an appointment before your next eligible date. Your previous donation was on ${lastDonationDateStr}. You are eligible to donate again on ${eligibleDateStr}.`,
           data: {
+            isEligible: false,
             previousDonationDate: lastDonationDateStr,
             lastDonationDate: lastDonationDateStr,
-            nextEligibleDate: eligibleDateStr
+            nextEligibleDate: eligibleDateStr,
+            daysRemaining
           }
         });
         return;
@@ -224,12 +252,15 @@ export const bookAppointment = async (req: AuthenticatedRequest, res: Response):
       return;
     }
 
-    // 4. Check for conflicting appointment
-    const conflicting = await findConflictingAppointment(donorId, appointmentDate, appointmentTime.trim());
-    if (conflicting) {
+    // 4. Backend Validation: check whether the authenticated donor already has an active upcoming appointment
+    const existingUpcoming = await findUpcomingAppointmentForDonor(donorId);
+    if (existingUpcoming) {
       res.status(409).json({
         success: false,
-        message: 'You already have an active appointment scheduled on this date at the same time.'
+        message: 'You already have an upcoming donation appointment.',
+        data: {
+          existingAppointment: existingUpcoming
+        }
       });
       return;
     }
@@ -260,7 +291,13 @@ export const bookAppointment = async (req: AuthenticatedRequest, res: Response):
           bloodBankName: bloodBank.name,
           bloodBankAddress: bloodBank.address,
           bloodBankCity: bloodBank.city,
-          bloodBankPhone: bloodBank.phone
+          bloodBankPhone: bloodBank.phone,
+          blood_bank_name: bloodBank.name,
+          blood_bank_address: bloodBank.address,
+          blood_bank_city: bloodBank.city,
+          blood_bank_phone: bloodBank.phone,
+          blood_bank_operating_hours: bloodBank.operating_hours,
+          blood_bank_type: bloodBank.type
         }
       }
     });
@@ -272,7 +309,7 @@ export const bookAppointment = async (req: AuthenticatedRequest, res: Response):
 
 /**
  * GET /api/donor/appointments
- * List all appointments booked by the authenticated donor.
+ * List all appointments booked by the authenticated donor, plus the single active upcoming appointment.
  */
 export const getAppointments = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
@@ -283,13 +320,44 @@ export const getAppointments = async (req: AuthenticatedRequest, res: Response):
     }
 
     const appointments = await findAppointmentsByDonor(donorId);
+    const upcomingAppointment = await findUpcomingAppointmentForDonor(donorId);
+
     res.status(200).json({
       success: true,
-      data: { appointments }
+      data: {
+        appointments,
+        upcomingAppointment: upcomingAppointment ?? null
+      }
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     res.status(500).json({ success: false, message: 'Failed to fetch appointments', error: message });
+  }
+};
+
+/**
+ * GET /api/donor/appointments/upcoming
+ * Retrieve the donor's single active upcoming appointment (PENDING or CONFIRMED on or after today).
+ */
+export const getUpcomingAppointment = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const donorId = req.user?.userId;
+    if (!donorId) {
+      res.status(401).json({ success: false, message: 'Authentication required' });
+      return;
+    }
+
+    const upcomingAppointment = await findUpcomingAppointmentForDonor(donorId);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        upcomingAppointment: upcomingAppointment ?? null
+      }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ success: false, message: 'Failed to fetch upcoming appointment', error: message });
   }
 };
 

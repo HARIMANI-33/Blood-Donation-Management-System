@@ -6,6 +6,7 @@ import {
   getHospitalProfile,
   updateHospitalProfileHandler,
   searchBloodForHospital,
+  getHospitalOrganizations,
   createBloodRequestHandler,
   getHospitalRequests,
   getHospitalRequestById,
@@ -18,8 +19,9 @@ const router = Router();
 router.post('/register', registerHospital);
 router.post('/login', loginHospital);
 
-// 2. Public / semi-public blood search for hospitals
+// 2. Public / semi-public blood search & organization discovery for hospitals
 router.get('/blood/search', searchBloodForHospital);
+router.get('/organizations', getHospitalOrganizations);
 
 // 3. Authenticated Hospital Management Endpoints (requires role: 'hospital' or 'admin')
 router.use(authenticate, requireHospital);

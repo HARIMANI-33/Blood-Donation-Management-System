@@ -7,7 +7,8 @@ import type {
   HospitalBloodSearchResult,
   HospitalBloodRequest,
   CreateHospitalBloodRequestInput,
-  HospitalAuthResponse
+  HospitalAuthResponse,
+  RegisteredFacility
 } from '../types/hospital';
 
 /**
@@ -98,6 +99,9 @@ export const searchBloodForHospital = (params: HospitalBloodSearchParams, token?
   if (params.urgency) {
     query.set('urgency', params.urgency);
   }
+  if (params.facilityName && params.facilityName.trim()) {
+    query.set('facilityName', params.facilityName.trim());
+  }
 
   const queryString = query.toString();
   const path = `/hospital/blood/search${queryString ? `?${queryString}` : ''}`;
@@ -106,6 +110,28 @@ export const searchBloodForHospital = (params: HospitalBloodSearchParams, token?
     success: boolean;
     count: number;
     data: HospitalBloodSearchResult[];
+  }>(path, {
+    method: 'GET',
+    token
+  });
+};
+
+/**
+ * Retrieve registered Real Database Organizations (Blood Banks and Hospitals)
+ * for autocomplete and facility selection.
+ */
+export const getHospitalOrganizations = (params?: { city?: string; query?: string }, token?: string) => {
+  const q = new URLSearchParams();
+  if (params?.city?.trim()) q.set('city', params.city.trim());
+  if (params?.query?.trim()) q.set('query', params.query.trim());
+
+  const qs = q.toString();
+  const path = `/hospital/organizations${qs ? `?${qs}` : ''}`;
+
+  return apiRequest<{
+    success: boolean;
+    count: number;
+    data: RegisteredFacility[];
   }>(path, {
     method: 'GET',
     token

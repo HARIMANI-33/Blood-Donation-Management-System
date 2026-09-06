@@ -26,6 +26,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { getHospitalProfile, updateHospitalProfile } from '../services/hospital.service';
 import { ApiError } from '../services/api';
+import PasswordChangeCard from '../components/PasswordChangeCard';
 import type { HospitalProfile } from '../types/hospital';
 
 const HospitalProfilePage = () => {
@@ -1265,6 +1266,16 @@ const HospitalProfilePage = () => {
           </form>
         </div>
       )}
+
+      {/* Hospital Account Security & Password Card */}
+      <div style={{ marginTop: '2rem' }}>
+        <PasswordChangeCard
+          token={token}
+          accountEmail={user?.email || profile?.email}
+          title="Hospital Account Security & Password"
+          subtitle="Update authorized clinical coordinator and facility credentials"
+        />
+      </div>
     </div>
   );
 };

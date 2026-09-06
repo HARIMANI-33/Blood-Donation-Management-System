@@ -206,6 +206,25 @@ export const initDatabase = async (): Promise<void> => {
     await query('CREATE INDEX IF NOT EXISTS idx_blood_requests_bank ON blood_requests(blood_bank_id)');
     await query('CREATE INDEX IF NOT EXISTS idx_blood_requests_status ON blood_requests(status)');
 
+    // Migration: Deduplicate legacy active requests (keeping the latest) and enforce uniqueness
+    await query(`
+      WITH ranked_dupes AS (
+        SELECT id, ROW_NUMBER() OVER(
+          PARTITION BY hospital_id, blood_bank_id 
+          ORDER BY created_at DESC, id DESC
+        ) as rn
+        FROM blood_requests
+        WHERE status IN ('PENDING', 'ACCEPTED')
+      )
+      DELETE FROM blood_requests
+      WHERE id IN (SELECT id FROM ranked_dupes WHERE rn > 1);
+    `);
+    await query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_active_hospital_blood_bank_request
+      ON blood_requests (hospital_id, blood_bank_id)
+      WHERE status IN ('PENDING', 'ACCEPTED');
+    `);
+
     // 8. Seed real registered blood banks and donation centers in major cities
     await query("UPDATE blood_banks SET is_donation_capable = FALSE WHERE city = 'Metro City'");
 

@@ -17,3 +17,13 @@ export const googleAuthUser = (payload: {
   access_token?: string;
 }): Promise<AuthResponse> =>
   apiRequest<AuthResponse>('/auth/google', { method: 'POST', body: payload });
+
+export const changeUserPassword = (
+  input: { currentPassword?: string; newPassword: string },
+  token: string
+): Promise<{ success: boolean; message: string }> =>
+  apiRequest<{ success: boolean; message: string }>('/auth/change-password', {
+    method: 'POST',
+    body: input,
+    token
+  });

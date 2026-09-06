@@ -6,6 +6,7 @@ import {
   getBloodBanks,
   bookAppointment,
   getAppointments,
+  getUpcomingAppointment,
   getAppointmentDetails,
   cancelAppointmentHandler,
   getDonations,
@@ -28,6 +29,7 @@ router.get('/blood-banks', getBloodBanks);
 // 3. Appointments
 router.post('/appointments', bookAppointment);
 router.get('/appointments', getAppointments);
+router.get('/appointments/upcoming', getUpcomingAppointment);
 router.get('/appointments/:id', getAppointmentDetails);
 router.patch('/appointments/:id/cancel', cancelAppointmentHandler);
 

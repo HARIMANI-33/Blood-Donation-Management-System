@@ -1,6 +1,14 @@
 import { useState, useRef, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Hospital, Lock, Clock, Building, Eye, EyeOff } from 'lucide-react';
+import {
+  Hospital,
+  Eye,
+  EyeOff,
+  Check,
+  X as XIcon,
+  LogIn,
+  AlertCircle
+} from 'lucide-react';
 import { registerHospital } from '../services/hospital.service';
 import { useAuth } from '../hooks/useAuth';
 import { ApiError } from '../services/api';
@@ -51,9 +59,21 @@ const HospitalRegister = () => {
   const emailRef = useRef<HTMLInputElement>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
   const cityRef = useRef<HTMLInputElement>(null);
-  const addressRef = useRef<HTMLTextAreaElement>(null);
+  const addressRef = useRef<HTMLInputElement>(null);
+  const hoursRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
   const confirmPasswordRef = useRef<HTMLInputElement>(null);
+
+  // Live Password Validation Checks
+  const hasMinLength = password.length >= 6;
+  const hasSpecialChar = SPECIAL_CHAR_REGEX.test(password);
+  const hasUpperCase = /[A-Z]/.test(password);
+  const hasLowerCase = /[a-z]/.test(password);
+  const hasNumber = /[0-9]/.test(password);
+
+  const isConfirmEntered = confirmPassword.length > 0;
+  const isPasswordMismatch = isConfirmEntered && password !== confirmPassword;
+  const isPasswordMatch = isConfirmEntered && password === confirmPassword;
 
   const handleFieldChange = (
     field: keyof FieldErrors,
@@ -81,10 +101,10 @@ const HospitalRegister = () => {
     // ==========================================
     // Ordered Validation (Top to Bottom)
     // 1. Hospital Name -> 2. Email -> 3. Phone ->
-    // 4. City -> 5. Address -> 6. Password -> 7. Confirm
+    // 4. City -> 5. Address -> 6. Hours -> 7. Password -> 8. Confirm
     // ==========================================
     const errors: FieldErrors = {};
-    let firstInvalidField: { name: string; ref: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null> } | null = null;
+    let firstInvalidField: { name: string; ref: React.RefObject<HTMLInputElement | null> } | null = null;
 
     // 1. Hospital Name
     if (!hospitalName.trim()) {
@@ -131,7 +151,13 @@ const HospitalRegister = () => {
       if (!firstInvalidField) firstInvalidField = { name: 'fullAddress', ref: addressRef };
     }
 
-    // 6. Password
+    // 6. Opening Hours
+    if (!openingHours.trim()) {
+      errors.openingHours = 'Opening Hours is required.';
+      if (!firstInvalidField) firstInvalidField = { name: 'openingHours', ref: hoursRef };
+    }
+
+    // 7. Password
     if (!password) {
       errors.password = 'Password is required.';
       if (!firstInvalidField) firstInvalidField = { name: 'password', ref: passwordRef };
@@ -143,7 +169,7 @@ const HospitalRegister = () => {
       if (!firstInvalidField) firstInvalidField = { name: 'password', ref: passwordRef };
     }
 
-    // 7. Confirm Password
+    // 8. Confirm Password
     if (!confirmPassword) {
       errors.confirmPassword = 'Please confirm your password.';
       if (!firstInvalidField) firstInvalidField = { name: 'confirmPassword', ref: confirmPasswordRef };
@@ -201,482 +227,358 @@ const HospitalRegister = () => {
     }
   };
 
-  const getInputStyle = (fieldName: keyof FieldErrors) => {
-    const hasError = !!fieldErrors[fieldName];
-    const isPulsing = pulseField === fieldName;
-
-    return {
-      width: '100%',
-      padding: '0.75rem 0.85rem',
-      borderRadius: '8px',
-      border: hasError ? '2px solid #ef4444' : '1px solid var(--neutral-300)',
-      backgroundColor: hasError ? '#fef2f2' : '#ffffff',
-      fontSize: '0.92rem',
-      outline: 'none',
-      transition: 'all 0.2s ease',
-      boxShadow: isPulsing ? '0 0 0 4px rgba(239, 68, 68, 0.35)' : 'none'
-    };
-  };
-
   return (
-    <div style={{ maxWidth: '840px', margin: '0 auto', padding: '2rem 1rem' }}>
-      <div className="page-header" style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '56px',
-            height: '56px',
-            borderRadius: '50%',
-            backgroundColor: 'var(--primary-100)',
-            color: 'var(--primary-700)',
-            marginBottom: '0.75rem'
-          }}
+    <div className="register-page-wrapper">
+      <div className="register-container">
+        {/* Page Header */}
+        <div className="register-page-header">
+          <div className="register-header-badge">
+            <Hospital size={14} />
+            <span>Join the LifeFlow Blood Search Network</span>
+          </div>
+          <h1 className="register-page-title">Search Blood Registration</h1>
+          <p className="register-page-subtitle">
+            Register your healthcare facility on LifeFlow for emergency blood discovery, search, and priority allocation.
+          </p>
+        </div>
+
+        {/* Wide Two-Column Registration Card */}
+        <form
+          onSubmit={handleSubmit}
+          className="register-card-wide"
+          noValidate
+          autoComplete="off"
         >
-          <Hospital size={30} />
-        </div>
-        <h1 className="page-title" style={{ fontSize: '1.9rem', marginBottom: '0.35rem' }}>
-          Hospital Registration
-        </h1>
-        <p style={{ color: 'var(--neutral-500)', fontSize: '0.95rem' }}>
-          Register your hospital facility on LifeFlow for emergency blood discovery and priority allocation.
-        </p>
-      </div>
-
-      <form
-        onSubmit={handleSubmit}
-        className="feature-card"
-        style={{
-          padding: '2rem',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '1.5rem'
-        }}
-        noValidate
-      >
-        {apiError && (
-          <div
-            style={{
-              padding: '0.85rem 1rem',
-              backgroundColor: '#fee2e2',
-              color: '#dc2626',
-              borderRadius: '8px',
-              fontSize: '0.9rem',
-              border: '1px solid #fecaca',
-              textAlign: 'center'
-            }}
-          >
-            {apiError}
+          {/* Top Secondary Login Banner */}
+          <div className="register-top-login-bar">
+            <span>Already registered for blood search?</span>
+            <Link to="/hospital/login" className="register-login-link" id="link-hospital-top-login">
+              <LogIn size={15} />
+              <span>Login to Blood Search Portal</span>
+            </Link>
           </div>
-        )}
 
-        {/* Section 1: Facility & Official Contact (Two-column landscape on desktop) */}
-        <div>
-          <h2
-            style={{
-              fontSize: '1rem',
-              fontWeight: 700,
-              color: 'var(--neutral-800)',
-              marginBottom: '1rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}
-          >
-            <Building size={18} style={{ color: 'var(--primary-600)' }} />
-            <span>Facility & Contact Information</span>
-          </h2>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-              gap: '1.25rem'
-            }}
-          >
-            {/* Hospital Name */}
-            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <label
-                htmlFor="reg-hosp-name"
-                style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--neutral-700)' }}
-              >
-                Hospital Name <span style={{ color: '#dc2626' }}>*</span>
-              </label>
-              <input
-                ref={nameRef}
-                id="reg-hosp-name"
-                type="text"
-                placeholder="e.g. Apollo Multi-Specialty Hospital"
-                value={hospitalName}
-                onChange={(e) => handleFieldChange('hospitalName', setHospitalName, e.target.value)}
-                style={getInputStyle('hospitalName')}
-              />
-              {fieldErrors.hospitalName && (
-                <span style={{ color: '#dc2626', fontSize: '0.8rem', fontWeight: 500 }}>
-                  {fieldErrors.hospitalName}
-                </span>
-              )}
+          {/* Global Error Banner */}
+          {apiError && (
+            <div className="register-error-banner" role="alert">
+              <AlertCircle size={18} style={{ flexShrink: 0 }} />
+              <span>{apiError}</span>
             </div>
-
-            {/* Official Email */}
-            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <label
-                htmlFor="reg-hosp-email"
-                style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--neutral-700)' }}
-              >
-                Official Email Address <span style={{ color: '#dc2626' }}>*</span>
-              </label>
-              <input
-                ref={emailRef}
-                id="reg-hosp-email"
-                type="email"
-                placeholder="example@gmail.com"
-                value={officialEmail}
-                onChange={(e) => handleFieldChange('officialEmail', setOfficialEmail, e.target.value)}
-                style={getInputStyle('officialEmail')}
-              />
-              {fieldErrors.officialEmail && (
-                <span style={{ color: '#dc2626', fontSize: '0.8rem', fontWeight: 500 }}>
-                  {fieldErrors.officialEmail}
-                </span>
-              )}
-            </div>
-
-            {/* Phone Number */}
-            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <label
-                htmlFor="reg-hosp-phone"
-                style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--neutral-700)' }}
-              >
-                Phone Number <span style={{ color: '#dc2626' }}>*</span>
-              </label>
-              <input
-                ref={phoneRef}
-                id="reg-hosp-phone"
-                type="tel"
-                placeholder="+91 44 2829 0000"
-                value={phone}
-                onChange={(e) => handleFieldChange('phone', setPhone, e.target.value)}
-                style={getInputStyle('phone')}
-              />
-              {fieldErrors.phone && (
-                <span style={{ color: '#dc2626', fontSize: '0.8rem', fontWeight: 500 }}>
-                  {fieldErrors.phone}
-                </span>
-              )}
-            </div>
-
-            {/* City */}
-            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <label
-                htmlFor="reg-hosp-city"
-                style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--neutral-700)' }}
-              >
-                City <span style={{ color: '#dc2626' }}>*</span>
-              </label>
-              <input
-                ref={cityRef}
-                id="reg-hosp-city"
-                type="text"
-                placeholder="e.g. Chennai"
-                value={city}
-                onChange={(e) => handleFieldChange('city', setCity, e.target.value)}
-                style={getInputStyle('city')}
-              />
-              <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.2rem', flexWrap: 'wrap' }}>
-                {QUICK_CITIES.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => handleFieldChange('city', setCity, c)}
-                    style={{
-                      border: '1px solid var(--neutral-300)',
-                      background: city === c ? 'var(--primary-100)' : '#ffffff',
-                      color: city === c ? 'var(--primary-700)' : 'var(--neutral-600)',
-                      fontSize: '0.75rem',
-                      padding: '0.15rem 0.45rem',
-                      borderRadius: '4px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
-              {fieldErrors.city && (
-                <span style={{ color: '#dc2626', fontSize: '0.8rem', fontWeight: 500 }}>
-                  {fieldErrors.city}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Full Address */}
-        <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-          <label
-            htmlFor="reg-hosp-address"
-            style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--neutral-700)' }}
-          >
-            Full Address <span style={{ color: '#dc2626' }}>*</span>
-          </label>
-          <textarea
-            ref={addressRef}
-            id="reg-hosp-address"
-            rows={2}
-            placeholder="Complete street address, area, landmark, and pincode"
-            value={fullAddress}
-            onChange={(e) => handleFieldChange('fullAddress', setFullAddress, e.target.value)}
-            style={{
-              ...getInputStyle('fullAddress'),
-              resize: 'vertical'
-            }}
-          />
-          {fieldErrors.fullAddress && (
-            <span style={{ color: '#dc2626', fontSize: '0.8rem', fontWeight: 500 }}>
-              {fieldErrors.fullAddress}
-            </span>
           )}
-        </div>
 
-        {/* Section 2: Optional Operations Details */}
-        <div style={{ borderTop: '1px solid var(--neutral-200)', paddingTop: '1.25rem' }}>
-          <h2
-            style={{
-              fontSize: '1rem',
-              fontWeight: 700,
-              color: 'var(--neutral-800)',
-              marginBottom: '1rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}
-          >
-            <Clock size={18} style={{ color: 'var(--primary-600)' }} />
-            <span>Operational Details (Optional)</span>
-          </h2>
+          {/* Two-Column Form Grid */}
+          <div className="register-two-column-grid">
+            {/* ================= LEFT COLUMN ================= */}
+            <div className="register-column">
+              {/* 1. Hospital Name */}
+              <div className="register-field-group">
+                <label className="register-field-label" htmlFor="reg-hosp-name">
+                  Hospital Name <span className="field-required">*</span>
+                </label>
+                <input
+                  ref={nameRef}
+                  id="reg-hosp-name"
+                  type="text"
+                  placeholder="e.g. Apollo Multi-Specialty Hospital"
+                  value={hospitalName}
+                  onChange={(e) => handleFieldChange('hospitalName', setHospitalName, e.target.value)}
+                  className={`register-input ${fieldErrors.hospitalName ? 'input-box-error' : ''} ${pulseField === 'hospitalName' ? 'input-invalid-pulse' : ''}`}
+                />
+                {fieldErrors.hospitalName && (
+                  <span className="register-field-error">
+                    {fieldErrors.hospitalName}
+                  </span>
+                )}
+              </div>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-              gap: '1.25rem'
-            }}
-          >
-            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <label
-                htmlFor="reg-hosp-hours"
-                style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--neutral-700)' }}
-              >
-                Operating Hours
-              </label>
-              <input
-                id="reg-hosp-hours"
-                type="text"
-                value={openingHours}
-                onChange={(e) => setOpeningHours(e.target.value)}
-                placeholder="24/7 Available"
-                style={getInputStyle('openingHours')}
-              />
+              {/* 2. Official Email */}
+              <div className="register-field-group">
+                <label className="register-field-label" htmlFor="reg-hosp-email">
+                  Official Email Address <span className="field-required">*</span>
+                </label>
+                <input
+                  ref={emailRef}
+                  id="reg-hosp-email"
+                  type="email"
+                  placeholder="example@gmail.com"
+                  value={officialEmail}
+                  onChange={(e) => handleFieldChange('officialEmail', setOfficialEmail, e.target.value)}
+                  className={`register-input ${fieldErrors.officialEmail ? 'input-box-error' : ''} ${pulseField === 'officialEmail' ? 'input-invalid-pulse' : ''}`}
+                />
+                {fieldErrors.officialEmail && (
+                  <span className="register-field-error">
+                    {fieldErrors.officialEmail}
+                  </span>
+                )}
+              </div>
+
+              {/* 3. Phone Number */}
+              <div className="register-field-group">
+                <label className="register-field-label" htmlFor="reg-hosp-phone">
+                  Phone Number <span className="field-required">*</span>
+                </label>
+                <input
+                  ref={phoneRef}
+                  id="reg-hosp-phone"
+                  type="tel"
+                  placeholder="+91 44 2829 0000"
+                  value={phone}
+                  onChange={(e) => handleFieldChange('phone', setPhone, e.target.value)}
+                  className={`register-input ${fieldErrors.phone ? 'input-box-error' : ''} ${pulseField === 'phone' ? 'input-invalid-pulse' : ''}`}
+                />
+                {fieldErrors.phone && (
+                  <span className="register-field-error">
+                    {fieldErrors.phone}
+                  </span>
+                )}
+              </div>
+
+              {/* 4. Hospital Type */}
+              <div className="register-field-group">
+                <label className="register-field-label" htmlFor="reg-hosp-type">
+                  Hospital Type
+                </label>
+                <select
+                  id="reg-hosp-type"
+                  value={hospitalType}
+                  onChange={(e) => setHospitalType(e.target.value)}
+                  className="register-input register-select"
+                >
+                  <option value="General Hospital">General Hospital</option>
+                  <option value="Multi-Specialty Hospital">Multi-Specialty Hospital</option>
+                  <option value="Super Specialty Hospital">Super Specialty Hospital</option>
+                  <option value="Government Medical College">Government Medical College</option>
+                  <option value="Research & Trauma Center">Research & Trauma Center</option>
+                </select>
+              </div>
+
+              {/* 5. Password */}
+              <div className="register-field-group">
+                <label className="register-field-label" htmlFor="reg-hosp-password">
+                  Password <span className="field-required">*</span>
+                </label>
+                <div className="password-input-wrapper">
+                  <input
+                    ref={passwordRef}
+                    id="reg-hosp-password"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="At least 6 characters"
+                    value={password}
+                    onChange={(e) => handleFieldChange('password', setPassword, e.target.value)}
+                    className={`register-input password-input-field ${fieldErrors.password ? 'input-box-error' : ''} ${pulseField === 'password' ? 'input-invalid-pulse' : ''}`}
+                  />
+                  <button
+                    type="button"
+                    className="password-toggle-btn"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+                {fieldErrors.password && (
+                  <span className="register-field-error">
+                    {fieldErrors.password}
+                  </span>
+                )}
+
+                {/* Live Password Requirements Checklist */}
+                <div className="password-requirements-list" style={{ marginTop: '0.35rem' }}>
+                  <span style={{ fontWeight: 600, color: '#334155', marginBottom: '0.15rem', fontSize: '0.78rem' }}>
+                    Password requirements:
+                  </span>
+                  <div className={`password-requirement-item ${hasMinLength ? 'valid' : ''}`}>
+                    {hasMinLength ? <Check size={13} /> : <XIcon size={13} />}
+                    <span>At least 6 characters</span>
+                  </div>
+                  <div className={`password-requirement-item ${hasSpecialChar ? 'valid' : ''}`}>
+                    {hasSpecialChar ? <Check size={13} /> : <XIcon size={13} />}
+                    <span>Special character (!@#$%^&*)</span>
+                  </div>
+                  <div className={`password-requirement-item ${hasUpperCase && hasLowerCase ? 'valid' : ''}`}>
+                    {hasUpperCase && hasLowerCase ? <Check size={13} /> : <XIcon size={13} />}
+                    <span>Upper & lowercase letters</span>
+                  </div>
+                  <div className={`password-requirement-item ${hasNumber ? 'valid' : ''}`}>
+                    {hasNumber ? <Check size={13} /> : <XIcon size={13} />}
+                    <span>At least one number (0-9)</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <label
-                htmlFor="reg-hosp-emergency"
-                style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--neutral-700)' }}
-              >
-                Emergency Contact
-              </label>
-              <input
-                id="reg-hosp-emergency"
-                type="tel"
-                value={emergencyContact}
-                onChange={(e) => setEmergencyContact(e.target.value)}
-                placeholder="+91 44 2829 1111"
-                style={getInputStyle('hospitalName')}
-              />
-            </div>
+            {/* ================= RIGHT COLUMN ================= */}
+            <div className="register-column">
+              {/* 1. City with Quick Suggestions */}
+              <div className="register-field-group">
+                <label className="register-field-label" htmlFor="reg-hosp-city">
+                  City / Location <span className="field-required">*</span>
+                </label>
+                <input
+                  ref={cityRef}
+                  id="reg-hosp-city"
+                  type="text"
+                  placeholder="e.g. Chennai"
+                  value={city}
+                  onChange={(e) => handleFieldChange('city', setCity, e.target.value)}
+                  className={`register-input ${fieldErrors.city ? 'input-box-error' : ''} ${pulseField === 'city' ? 'input-invalid-pulse' : ''}`}
+                />
+                {fieldErrors.city && (
+                  <span className="register-field-error">
+                    {fieldErrors.city}
+                  </span>
+                )}
+                {/* Quick City Pills */}
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.3rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#64748b', alignSelf: 'center' }}>Quick:</span>
+                  {QUICK_CITIES.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => handleFieldChange('city', setCity, c)}
+                      style={{
+                        background: city === c ? '#fee2e2' : '#f1f5f9',
+                        color: city === c ? '#dc2626' : '#475569',
+                        border: `1px solid ${city === c ? '#fca5a5' : '#cbd5e1'}`,
+                        borderRadius: '9999px',
+                        padding: '0.15rem 0.6rem',
+                        fontSize: '0.74rem',
+                        fontWeight: city === c ? 700 : 500,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <label
-                htmlFor="reg-hosp-type"
-                style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--neutral-700)' }}
-              >
-                Hospital Type
-              </label>
-              <select
-                id="reg-hosp-type"
-                value={hospitalType}
-                onChange={(e) => setHospitalType(e.target.value)}
-                style={{
-                  ...getInputStyle('hospitalName'),
-                  cursor: 'pointer'
-                }}
-              >
-                <option value="General Hospital">General Hospital</option>
-                <option value="Multi-Specialty Hospital">Multi-Specialty Hospital</option>
-                <option value="Super Specialty Hospital">Super Specialty Hospital</option>
-                <option value="Government Medical College">Government Medical College</option>
-                <option value="Research & Trauma Center">Research & Trauma Center</option>
-              </select>
+              {/* 2. Full Facility Address */}
+              <div className="register-field-group">
+                <label className="register-field-label" htmlFor="reg-hosp-address">
+                  Full Address <span className="field-required">*</span>
+                </label>
+                <input
+                  ref={addressRef}
+                  id="reg-hosp-address"
+                  type="text"
+                  placeholder="Street address, department, locality"
+                  value={fullAddress}
+                  onChange={(e) => handleFieldChange('fullAddress', setFullAddress, e.target.value)}
+                  className={`register-input ${fieldErrors.fullAddress ? 'input-box-error' : ''} ${pulseField === 'fullAddress' ? 'input-invalid-pulse' : ''}`}
+                />
+                {fieldErrors.fullAddress && (
+                  <span className="register-field-error">
+                    {fieldErrors.fullAddress}
+                  </span>
+                )}
+              </div>
+
+              {/* 3. Opening Hours */}
+              <div className="register-field-group">
+                <label className="register-field-label" htmlFor="reg-hosp-hours">
+                  Opening / Service Hours <span className="field-required">*</span>
+                </label>
+                <input
+                  ref={hoursRef}
+                  id="reg-hosp-hours"
+                  type="text"
+                  placeholder="e.g. 24/7 Available or 08:00 AM - 10:00 PM"
+                  value={openingHours}
+                  onChange={(e) => handleFieldChange('openingHours', setOpeningHours, e.target.value)}
+                  className={`register-input ${fieldErrors.openingHours ? 'input-box-error' : ''} ${pulseField === 'openingHours' ? 'input-invalid-pulse' : ''}`}
+                />
+                {fieldErrors.openingHours && (
+                  <span className="register-field-error">
+                    {fieldErrors.openingHours}
+                  </span>
+                )}
+              </div>
+
+              {/* 4. Emergency Contact (Optional) */}
+              <div className="register-field-group">
+                <label className="register-field-label" htmlFor="reg-hosp-emergency">
+                  Emergency Helpline <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 400 }}>(Optional)</span>
+                </label>
+                <input
+                  id="reg-hosp-emergency"
+                  type="tel"
+                  placeholder="+91 44 2829 1066 (24/7 Emergency Line)"
+                  value={emergencyContact}
+                  onChange={(e) => setEmergencyContact(e.target.value)}
+                  className="register-input"
+                />
+              </div>
+
+              {/* 5. Confirm Password */}
+              <div className="register-field-group">
+                <label className="register-field-label" htmlFor="reg-hosp-confirm-pass">
+                  Confirm Password <span className="field-required">*</span>
+                </label>
+                <div className="password-input-wrapper">
+                  <input
+                    ref={confirmPasswordRef}
+                    id="reg-hosp-confirm-pass"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    placeholder="Re-enter password"
+                    value={confirmPassword}
+                    onChange={(e) => handleFieldChange('confirmPassword', setConfirmPassword, e.target.value)}
+                    className={`register-input password-input-field ${fieldErrors.confirmPassword || isPasswordMismatch ? 'input-box-error' : ''} ${isPasswordMatch ? 'input-box-success' : ''} ${pulseField === 'confirmPassword' ? 'input-invalid-pulse' : ''}`}
+                  />
+                  <button
+                    type="button"
+                    className="password-toggle-btn"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+                {fieldErrors.confirmPassword && (
+                  <span className="register-field-error">
+                    {fieldErrors.confirmPassword}
+                  </span>
+                )}
+                {isPasswordMismatch && (
+                  <div className="password-match-status mismatch">
+                    <XIcon size={14} />
+                    <span>Passwords do not match</span>
+                  </div>
+                )}
+                {isPasswordMatch && (
+                  <div className="password-match-status match">
+                    <Check size={14} />
+                    <span>Passwords match</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Section 3: Password & Security */}
-        <div style={{ borderTop: '1px solid var(--neutral-200)', paddingTop: '1.25rem' }}>
-          <h2
-            style={{
-              fontSize: '1rem',
-              fontWeight: 700,
-              color: 'var(--neutral-800)',
-              marginBottom: '1rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}
-          >
-            <Lock size={18} style={{ color: 'var(--primary-600)' }} />
-            <span>Account Security</span>
-          </h2>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-              gap: '1.25rem'
-            }}
-          >
-            {/* Password */}
-            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <label
-                htmlFor="reg-hosp-password"
-                style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--neutral-700)' }}
-              >
-                Password <span style={{ color: '#dc2626' }}>*</span>
-              </label>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <input
-                  ref={passwordRef}
-                  id="reg-hosp-password"
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="Min. 6 chars with special char (!@#$...)"
-                  value={password}
-                  onChange={(e) => handleFieldChange('password', setPassword, e.target.value)}
-                  style={{
-                    ...getInputStyle('password'),
-                    paddingRight: '2.5rem'
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  style={{
-                    position: 'absolute',
-                    right: '10px',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: 'var(--neutral-400)',
-                    display: 'flex',
-                    alignItems: 'center'
-                  }}
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-              {fieldErrors.password && (
-                <span style={{ color: '#dc2626', fontSize: '0.8rem', fontWeight: 500 }}>
-                  {fieldErrors.password}
-                </span>
+          {/* Centered Wide Action Button */}
+          <div className="register-actions-row">
+            <button
+              type="submit"
+              className="btn-primary btn-register-submit"
+              disabled={isSubmitting}
+              id="btn-hospital-register"
+            >
+              {isSubmitting ? (
+                <span>Registering Hospital...</span>
+              ) : (
+                <>
+                  <Hospital size={18} />
+                  <span>Complete Blood Search Registration</span>
+                </>
               )}
-            </div>
-
-            {/* Confirm Password */}
-            <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <label
-                htmlFor="reg-hosp-confirm-pass"
-                style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--neutral-700)' }}
-              >
-                Confirm Password <span style={{ color: '#dc2626' }}>*</span>
-              </label>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <input
-                  ref={confirmPasswordRef}
-                  id="reg-hosp-confirm-pass"
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  placeholder="Re-enter password"
-                  value={confirmPassword}
-                  onChange={(e) => handleFieldChange('confirmPassword', setConfirmPassword, e.target.value)}
-                  style={{
-                    ...getInputStyle('confirmPassword'),
-                    paddingRight: '2.5rem'
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
-                  style={{
-                    position: 'absolute',
-                    right: '10px',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: 'var(--neutral-400)',
-                    display: 'flex',
-                    alignItems: 'center'
-                  }}
-                >
-                  {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-              {fieldErrors.confirmPassword && (
-                <span style={{ color: '#dc2626', fontSize: '0.8rem', fontWeight: 500 }}>
-                  {fieldErrors.confirmPassword}
-                </span>
-              )}
-            </div>
+            </button>
+            <p className="register-legal-notice">
+              LifeFlow verifies all healthcare facilities for emergency priority allocation and compliance.
+            </p>
           </div>
-        </div>
-
-        <button
-          type="submit"
-          className="btn btn-primary"
-          disabled={isSubmitting}
-          id="btn-hospital-register"
-          style={{
-            width: '100%',
-            padding: '0.9rem',
-            marginTop: '0.75rem',
-            fontWeight: 600,
-            fontSize: '1rem',
-            cursor: isSubmitting ? 'not-allowed' : 'pointer',
-            opacity: isSubmitting ? 0.75 : 1
-          }}
-        >
-          {isSubmitting ? 'Registering Hospital...' : 'Complete Hospital Registration'}
-        </button>
-
-        <div
-          style={{
-            textAlign: 'center',
-            fontSize: '0.92rem',
-            color: 'var(--neutral-600)'
-          }}
-        >
-          Already registered your hospital?{' '}
-          <Link
-            to="/hospital/login"
-            id="link-hospital-login"
-            style={{ color: 'var(--primary-600)', fontWeight: 600, textDecoration: 'underline' }}
-          >
-            Sign in to Hospital Portal
-          </Link>
-        </div>
-      </form>
+        </form>
+      </div>
     </div>
   );
 };

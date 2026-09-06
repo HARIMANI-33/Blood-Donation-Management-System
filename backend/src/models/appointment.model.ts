@@ -18,6 +18,8 @@ export interface Appointment {
   blood_bank_address?: string;
   blood_bank_city?: string;
   blood_bank_phone?: string;
+  blood_bank_operating_hours?: string | null;
+  blood_bank_type?: string | null;
 }
 
 export interface BloodBankAppointmentItem {
@@ -68,10 +70,16 @@ export const findConflictingAppointment = async (
 
 /**
  * Check if donor has any upcoming active appointment (PENDING or CONFIRMED for today or later).
+ * Guarantees TO_CHAR YYYY-MM-DD formatting, joins blood bank details, and returns the earliest upcoming appointment.
  */
 export const findUpcomingAppointmentForDonor = async (donorId: string): Promise<Appointment | null> => {
   const result = await query(
-    `SELECT a.*, b.name as blood_bank_name, b.address as blood_bank_address, b.city as blood_bank_city, b.phone as blood_bank_phone
+    `SELECT a.id, a.donor_id, a.blood_bank_id,
+            TO_CHAR(a.appointment_date, 'YYYY-MM-DD') AS appointment_date,
+            a.appointment_time, a.status, a.notes, a.blood_group, a.created_at, a.updated_at,
+            b.name AS blood_bank_name, b.address AS blood_bank_address,
+            b.city AS blood_bank_city, b.phone AS blood_bank_phone,
+            b.operating_hours AS blood_bank_operating_hours, b.type AS blood_bank_type
      FROM appointments a
      JOIN blood_banks b ON a.blood_bank_id = b.id
      WHERE a.donor_id = $1
@@ -86,12 +94,15 @@ export const findUpcomingAppointmentForDonor = async (donorId: string): Promise<
 
 /**
  * Create a new donation appointment (starts in PENDING state awaiting blood bank review).
+ * Formats appointment_date as YYYY-MM-DD string on RETURNING.
  */
 export const createAppointment = async (input: CreateAppointmentInput): Promise<Appointment> => {
   const result = await query(
     `INSERT INTO appointments (donor_id, blood_bank_id, appointment_date, appointment_time, status, notes, blood_group)
      VALUES ($1, $2, $3, $4, 'PENDING', $5, $6)
-     RETURNING *`,
+     RETURNING id, donor_id, blood_bank_id,
+               TO_CHAR(appointment_date, 'YYYY-MM-DD') AS appointment_date,
+               appointment_time, status, notes, blood_group, created_at, updated_at`,
     [
       input.donorId,
       input.bloodBankId,
@@ -111,9 +122,10 @@ export const findAppointmentsByDonor = async (donorId: string): Promise<Appointm
   const result = await query(
     `SELECT a.id, a.donor_id, a.blood_bank_id,
             TO_CHAR(a.appointment_date, 'YYYY-MM-DD') AS appointment_date,
-            a.appointment_time, a.status, a.notes, a.created_at, a.updated_at,
+            a.appointment_time, a.status, a.notes, a.blood_group, a.created_at, a.updated_at,
             b.name AS blood_bank_name, b.address AS blood_bank_address,
-            b.city AS blood_bank_city, b.phone AS blood_bank_phone
+            b.city AS blood_bank_city, b.phone AS blood_bank_phone,
+            b.operating_hours AS blood_bank_operating_hours, b.type AS blood_bank_type
      FROM appointments a
      JOIN blood_banks b ON a.blood_bank_id = b.id
      WHERE a.donor_id = $1
@@ -130,9 +142,10 @@ export const findAppointmentById = async (id: string, donorId: string): Promise<
   const result = await query(
     `SELECT a.id, a.donor_id, a.blood_bank_id,
             TO_CHAR(a.appointment_date, 'YYYY-MM-DD') AS appointment_date,
-            a.appointment_time, a.status, a.notes, a.created_at, a.updated_at,
+            a.appointment_time, a.status, a.notes, a.blood_group, a.created_at, a.updated_at,
             b.name AS blood_bank_name, b.address AS blood_bank_address,
-            b.city AS blood_bank_city, b.phone AS blood_bank_phone
+            b.city AS blood_bank_city, b.phone AS blood_bank_phone,
+            b.operating_hours AS blood_bank_operating_hours, b.type AS blood_bank_type
      FROM appointments a
      JOIN blood_banks b ON a.blood_bank_id = b.id
      WHERE a.id = $1 AND a.donor_id = $2
@@ -150,7 +163,9 @@ export const cancelAppointment = async (id: string, donorId: string): Promise<Ap
     `UPDATE appointments
      SET status = 'CANCELLED', updated_at = now()
      WHERE id = $1 AND donor_id = $2 AND status IN ('PENDING', 'CONFIRMED')
-     RETURNING *`,
+     RETURNING id, donor_id, blood_bank_id,
+               TO_CHAR(appointment_date, 'YYYY-MM-DD') AS appointment_date,
+               appointment_time, status, notes, blood_group, created_at, updated_at`,
     [id, donorId]
   );
   return result.rows[0] ?? null;

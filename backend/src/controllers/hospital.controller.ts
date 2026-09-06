@@ -10,6 +10,7 @@ import {
 } from '../models/hospital.model';
 import {
   createBloodRequest,
+  findActiveBloodRequest,
   findBloodRequestsByHospital,
   findBloodRequestById,
   updateBloodRequestStatus,
@@ -375,14 +376,25 @@ export const searchBloodForHospital = async (req: Request, res: Response): Promi
 
     const city = typeof req.query.city === 'string' ? req.query.city.trim() : undefined;
     const urgency = typeof req.query.urgency === 'string' ? req.query.urgency.trim().toUpperCase() : undefined;
+    const facilityName = typeof req.query.facilityName === 'string' ? req.query.facilityName.trim() :
+                         typeof req.query.query === 'string' ? req.query.query.trim() : undefined;
 
-    const conditions: string[] = ['b.is_donation_capable = TRUE'];
+    const conditions: string[] = [
+      'b.is_donation_capable = TRUE',
+      "NOT (b.name ~ '[0-9]{4,}' OR b.name ILIKE 'LifeFlow Center%' OR b.name ILIKE '%Test Blood Bank%' OR b.name ILIKE 'Apollo Blood Bank Chennai')"
+    ];
     const params: unknown[] = [];
     let paramIdx = 1;
 
     if (city) {
       params.push(city);
       conditions.push(`(LOWER(b.city) = LOWER($${paramIdx}) OR b.city ILIKE '%' || $${paramIdx} || '%')`);
+      paramIdx++;
+    }
+
+    if (facilityName) {
+      params.push(facilityName);
+      conditions.push(`b.name ILIKE '%' || $${paramIdx} || '%'`);
       paramIdx++;
     }
 
@@ -416,18 +428,127 @@ export const searchBloodForHospital = async (req: Request, res: Response): Promi
 
     const result = await query(sql, params);
 
+    // Rule 10: Deduplicate by normalized name and ID so each facility appears ONLY ONCE
+    const seen = new Set<string>();
+    const deduplicatedRows = [];
+    for (const row of result.rows) {
+      const normKey = row.name.trim().toLowerCase();
+      if (!seen.has(normKey) && !seen.has(row.bloodBankId)) {
+        seen.add(normKey);
+        seen.add(row.bloodBankId);
+        deduplicatedRows.push({
+          ...row,
+          isLive: true,
+          source: 'LIVE'
+        });
+      }
+    }
+
     res.status(200).json({
       success: true,
-      count: result.rows.length,
+      count: deduplicatedRows.length,
       requestedQuantity: quantity,
       requestedBloodGroup: rawBloodGroup ?? null,
       city: city ?? null,
       urgency: urgency ?? 'NORMAL',
-      data: result.rows
+      data: deduplicatedRows
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     res.status(500).json({ success: false, message: 'Search failed', error: message });
+  }
+};
+
+/**
+ * GET /api/hospital/organizations
+ * Retrieve registered Real Database Organizations (Blood Banks and Hospitals)
+ * for autocomplete and manual search.
+ */
+export const getHospitalOrganizations = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const city = typeof req.query.city === 'string' ? req.query.city.trim() : undefined;
+    const search = typeof req.query.query === 'string' ? req.query.query.trim() : undefined;
+
+    const conditionsBB: string[] = [
+      'b.is_donation_capable = TRUE',
+      "NOT (b.name ~ '[0-9]{4,}' OR b.name ILIKE 'LifeFlow Center%' OR b.name ILIKE '%Test Blood Bank%' OR b.name ILIKE 'Apollo Blood Bank Chennai')"
+    ];
+    const paramsBB: unknown[] = [];
+    let pIdx = 1;
+
+    if (city) {
+      conditionsBB.push(`(LOWER(b.city) = LOWER($${pIdx}) OR b.city ILIKE '%' || $${pIdx} || '%')`);
+      paramsBB.push(city);
+      pIdx++;
+    }
+    if (search) {
+      conditionsBB.push(`b.name ILIKE '%' || $${pIdx} || '%'`);
+      paramsBB.push(search);
+      pIdx++;
+    }
+
+    const bbSql = `
+      SELECT id, name, city, address, phone, operating_hours AS "openingHours", 'Blood Bank' AS type, TRUE AS "isLive"
+      FROM blood_banks b
+      WHERE ${conditionsBB.join(' AND ')}
+      ORDER BY b.name ASC
+    `;
+    const bbRes = await query(bbSql, paramsBB);
+
+    const conditionsHosp: string[] = [
+      "NOT (h.name ~ '[0-9]{4,}' OR h.name ILIKE '%Test Hosp%')"
+    ];
+    const paramsHosp: unknown[] = [];
+    let hIdx = 1;
+
+    if (city) {
+      conditionsHosp.push(`(LOWER(h.city) = LOWER($${hIdx}) OR h.city ILIKE '%' || $${hIdx} || '%')`);
+      paramsHosp.push(city);
+      hIdx++;
+    }
+    if (search) {
+      conditionsHosp.push(`h.name ILIKE '%' || $${hIdx} || '%'`);
+      paramsHosp.push(search);
+      hIdx++;
+    }
+
+    const hospSql = `
+      SELECT id, name, city, address, phone, operating_hours AS "openingHours", 'Hospital' AS type, TRUE AS "isLive"
+      FROM hospitals h
+      WHERE ${conditionsHosp.join(' AND ')}
+      ORDER BY h.name ASC
+    `;
+    const hospRes = await query(hospSql, paramsHosp);
+
+    // Deduplicate by normalized name
+    const seen = new Set<string>();
+    const allOrgs: Array<{
+      id: string;
+      name: string;
+      city: string;
+      address: string;
+      phone: string;
+      openingHours?: string;
+      type: string;
+      isLive: boolean;
+    }> = [];
+
+    for (const r of [...bbRes.rows, ...hospRes.rows]) {
+      const key = `${r.type}:${r.name.trim().toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        allOrgs.push(r);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      count: allOrgs.length,
+      data: allOrgs
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ success: false, message: 'Failed to fetch organizations', error: message });
   }
 };
 
@@ -501,6 +622,29 @@ export const createBloodRequestHandler = async (
       }
     }
 
+    // 4b. Active Request Duplicate Prevention (Rule 1):
+    // For the same hospital and same blood bank, only ONE active request (PENDING or ACCEPTED) is allowed.
+    const existingActive = await findActiveBloodRequest(hospitalId, bloodBank.id, req.user?.userId);
+    if (existingActive) {
+      res.status(409).json({
+        success: false,
+        message: 'An active blood request already exists with this blood bank.',
+        data: {
+          existingRequest: {
+            id: existingActive.id,
+            bloodBankId: existingActive.blood_bank_id,
+            bloodBankName: existingActive.blood_bank_name || bloodBank.name,
+            bloodGroup: existingActive.blood_group,
+            quantity: existingActive.quantity,
+            urgency: existingActive.urgency,
+            status: existingActive.status,
+            createdAt: existingActive.created_at
+          }
+        }
+      });
+      return;
+    }
+
     // 5. Create blood request (does NOT decrease inventory)
     const newRequest = await createBloodRequest({
       hospitalId,
@@ -535,6 +679,13 @@ export const createBloodRequestHandler = async (
       }
     });
   } catch (error) {
+    if ((error as { code?: string })?.code === '23505') {
+      res.status(409).json({
+        success: false,
+        message: 'An active blood request already exists with this blood bank.'
+      });
+      return;
+    }
     const message = error instanceof Error ? error.message : 'Unknown error';
     res.status(500).json({ success: false, message: 'Failed to create blood request', error: message });
   }
