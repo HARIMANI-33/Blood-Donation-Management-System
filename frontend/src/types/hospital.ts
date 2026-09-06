@@ -48,6 +48,7 @@ export interface HospitalBloodSearchParams {
   quantity?: number;
   city?: string;
   urgency?: BloodRequestUrgency | string;
+  facilityName?: string;
 }
 
 export interface HospitalBloodSearchResult {
@@ -60,6 +61,20 @@ export interface HospitalBloodSearchResult {
   bloodGroup: BloodGroup;
   availableQuantity: number;
   canFulfill: boolean;
+  isLive?: boolean;
+  source?: 'LIVE' | 'DEMO';
+  type?: string;
+}
+
+export interface RegisteredFacility {
+  id: string;
+  name: string;
+  city: string;
+  address: string;
+  phone: string;
+  openingHours?: string;
+  type: string;
+  isLive: boolean;
 }
 
 export interface HospitalBloodRequest {

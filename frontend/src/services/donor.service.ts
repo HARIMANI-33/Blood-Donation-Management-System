@@ -25,10 +25,22 @@ export const updateDonorProfile = (token: string, input: UpdateProfileInput): Pr
   apiRequest<DonorProfileResponse>('/donor/profile', { method: 'PUT', token, body: input });
 
 /**
- * Fetch certified blood banks / donation centers, optionally filtered by name, city, or address.
+ * Fetch certified blood banks / donation centers, optionally filtered by city and/or search keyword.
  */
-export const fetchBloodBanks = (token: string, searchOrCity?: string): Promise<BloodBanksResponse> => {
-  const query = searchOrCity && searchOrCity.trim() ? `?search=${encodeURIComponent(searchOrCity.trim())}` : '';
+export const fetchBloodBanks = (
+  token: string,
+  filter?: string | { city?: string; search?: string }
+): Promise<BloodBanksResponse> => {
+  let query = '';
+  if (typeof filter === 'string' && filter.trim()) {
+    query = `?city=${encodeURIComponent(filter.trim())}`;
+  } else if (filter && typeof filter === 'object') {
+    const params = new URLSearchParams();
+    if (filter.city && filter.city.trim()) params.append('city', filter.city.trim());
+    if (filter.search && filter.search.trim()) params.append('search', filter.search.trim());
+    const str = params.toString();
+    if (str) query = `?${str}`;
+  }
   return apiRequest<BloodBanksResponse>(`/donor/blood-banks${query}`, { token });
 };
 
@@ -51,6 +63,12 @@ export const bookAppointment = (token: string, input: BookAppointmentInput): Pro
  */
 export const fetchDonorAppointments = (token: string): Promise<AppointmentsResponse> =>
   apiRequest<AppointmentsResponse>('/donor/appointments', { token });
+
+/**
+ * Fetch the donor's single active upcoming appointment (one source of truth).
+ */
+export const fetchUpcomingAppointment = (token: string): Promise<{ success: boolean; data: { upcomingAppointment: Appointment | null } }> =>
+  apiRequest('/donor/appointments/upcoming', { token });
 
 /**
  * Fetch a single appointment details by ID.

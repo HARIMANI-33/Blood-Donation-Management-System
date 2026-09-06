@@ -6,6 +6,7 @@ import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import Dashboard from './pages/Dashboard';
 import Profile from './pages/Profile';
+import AppointmentBookedPage from './pages/AppointmentBookedPage';
 import BloodBankRegister from './pages/BloodBankRegister';
 import BloodBankLogin from './pages/BloodBankLogin';
 import BloodBankDashboard from './pages/BloodBankDashboard';
@@ -44,6 +45,14 @@ function App() {
               element={
                 <ProtectedRoute requiredRole="donor">
                   <Profile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="appointment-booked"
+              element={
+                <ProtectedRoute requiredRole="donor">
+                  <AppointmentBookedPage />
                 </ProtectedRoute>
               }
             />

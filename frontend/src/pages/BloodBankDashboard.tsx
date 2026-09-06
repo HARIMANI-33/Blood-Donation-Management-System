@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   Building2,
   Droplet,
+  Droplets,
   Calendar,
   Clock,
   MapPin,
@@ -10,16 +11,19 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
+  AlertTriangle,
+  X,
   RefreshCw,
   Plus,
   Minus,
   Edit3,
   Check,
-  Search,
   Inbox,
-  Activity
+  Activity,
+  ShieldCheck
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import PasswordChangeCard from '../components/PasswordChangeCard';
 import {
   getBloodBankProfile,
   updateBloodBankProfile,
@@ -44,17 +48,25 @@ import type { BloodGroup } from '../types/auth';
 
 const ALL_BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
+interface FulfillModalTarget {
+  request: IncomingHospitalBloodRequest;
+  bloodGroup: string;
+  requestedQuantity: number;
+  currentStock: number;
+  remainingStock: number;
+}
+
 const BloodBankDashboard = () => {
   const { token, user } = useAuth();
   const [searchParams] = useSearchParams();
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<'inventory' | 'appointments' | 'requests' | 'profile' | 'search'>('inventory');
+  const [activeTab, setActiveTab] = useState<'inventory' | 'appointments' | 'requests' | 'profile'>('inventory');
 
   useEffect(() => {
     const tabParam = searchParams.get('tab');
-    if (tabParam === 'inventory' || tabParam === 'appointments' || tabParam === 'requests' || tabParam === 'hospital-requests' || tabParam === 'profile' || tabParam === 'search') {
-      setActiveTab(tabParam === 'hospital-requests' ? 'requests' : (tabParam as 'inventory' | 'appointments' | 'requests' | 'profile' | 'search'));
+    if (tabParam === 'inventory' || tabParam === 'appointments' || tabParam === 'requests' || tabParam === 'hospital-requests' || tabParam === 'profile') {
+      setActiveTab(tabParam === 'hospital-requests' ? 'requests' : (tabParam as 'inventory' | 'appointments' | 'requests' | 'profile'));
     }
   }, [searchParams]);
 
@@ -77,6 +89,11 @@ const BloodBankDashboard = () => {
   const [requestFilter, setRequestFilter] = useState<'ALL' | 'PENDING' | 'ACCEPTED' | 'FULFILLED' | 'REJECTED_OR_CANCELLED'>('ALL');
   const [requestActionLoadingId, setRequestActionLoadingId] = useState<string | null>(null);
 
+  // Fulfillment Confirmation Modal State
+  const [fulfillModalTarget, setFulfillModalTarget] = useState<FulfillModalTarget | null>(null);
+  const [isFulfilling, setIsFulfilling] = useState(false);
+  const [fulfillError, setFulfillError] = useState<string | null>(null);
+
   // Inventory Quick Edit Modal / Popover
   const [editingGroup, setEditingGroup] = useState<BloodGroup | null>(null);
   const [editQuantityVal, setEditQuantityVal] = useState<number>(0);
@@ -89,11 +106,6 @@ const BloodBankDashboard = () => {
   const [profileAddress, setProfileAddress] = useState('');
   const [profileHours, setProfileHours] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
-
-  // Public Search Test Simulator
-  const [searchCity, setSearchCity] = useState('Chennai');
-  const [searchGroup, setSearchGroup] = useState<BloodGroup>('O+');
-  const [searchQty, setSearchQty] = useState<number>(5);
 
   const showNotification = (type: 'success' | 'error', text: string) => {
     setStatusMessage({ type, text });
@@ -331,28 +343,77 @@ const BloodBankDashboard = () => {
     }
   };
 
-  const handleFulfillHospitalRequest = async (requestId: string, bloodGroup: string, quantity: number) => {
-    if (!token) return;
-    if (!window.confirm(`Fulfill blood request for ${quantity} units of ${bloodGroup}? This will immediately deduct ${quantity} units from inventory.`)) {
-      return;
-    }
+  const openFulfillModal = (req: IncomingHospitalBloodRequest) => {
+    const bloodGrp = req.blood_group || req.bloodGroup;
+    const currentStock = inventory.find((i) => i.bloodGroup === bloodGrp)?.quantity ?? 0;
+    const remainingStock = Math.max(0, currentStock - req.quantity);
+    setFulfillError(null);
+    setFulfillModalTarget({
+      request: req,
+      bloodGroup: bloodGrp,
+      requestedQuantity: req.quantity,
+      currentStock,
+      remainingStock
+    });
+  };
+
+  const closeFulfillModal = () => {
+    if (isFulfilling) return;
+    setFulfillModalTarget(null);
+    setFulfillError(null);
+  };
+
+  const handleConfirmFulfillment = async () => {
+    if (!fulfillModalTarget || !token || isFulfilling) return;
+    const { request, bloodGroup, requestedQuantity } = fulfillModalTarget;
+
     try {
-      setRequestActionLoadingId(requestId);
-      const res = await fulfillBloodRequest(requestId, token);
+      setIsFulfilling(true);
+      setFulfillError(null);
+      setRequestActionLoadingId(request.id);
+
+      const res = await fulfillBloodRequest(request.id, token);
       if (res.data?.request) {
+        // 1. Update request status to FULFILLED in local state immediately
         setHospitalRequests((prev) =>
-          prev.map((r) => (r.id === requestId ? { ...r, status: 'FULFILLED' } : r))
+          prev.map((r) => (r.id === request.id ? { ...r, status: 'FULFILLED' } : r))
         );
-        // Live reload inventory so numbers decrement on screen immediately
+
+        // 2. Fetch fresh real inventory from backend (backend is source of truth)
         const invRes = await getBloodBankInventory(token);
         if (invRes.data?.inventory) {
           setInventory(invRes.data.inventory);
         }
-        showNotification('success', `Blood request fulfilled! Deducted ${quantity} units of ${bloodGroup} from stock.`);
+
+        // 3. Refresh incoming requests list from backend for full sync
+        try {
+          const reqRes = await getIncomingBloodRequests(token);
+          if (reqRes.data?.requests) {
+            setHospitalRequests(reqRes.data.requests);
+          }
+        } catch {
+          // Local state already updated
+        }
+
+        // 4. Close the modal
+        setFulfillModalTarget(null);
+
+        // 5. Show success notification toast
+        showNotification(
+          'success',
+          `Blood request fulfilled! Deducted ${requestedQuantity} ${requestedQuantity === 1 ? 'unit' : 'units'} of ${bloodGroup} from inventory.`
+        );
+      } else {
+        const errorMsg = 'Unexpected response from server while fulfilling request.';
+        setFulfillError(errorMsg);
+        showNotification('error', errorMsg);
       }
     } catch (err: unknown) {
-      showNotification('error', err instanceof Error ? err.message : 'Failed to fulfill request');
+      const errorMsg = err instanceof Error ? err.message : 'Failed to fulfill blood request. Please try again.';
+      setFulfillError(errorMsg);
+      showNotification('error', errorMsg);
     } finally {
+      setIsFulfilling(false);
       setRequestActionLoadingId(null);
     }
   };
@@ -386,7 +447,7 @@ const BloodBankDashboard = () => {
     return (
       <div style={{ textAlign: 'center', padding: '4rem 1rem' }}>
         <RefreshCw className="animate-spin" size={32} style={{ color: 'var(--primary-600)', margin: '0 auto' }} />
-        <p style={{ marginTop: '1rem', color: 'var(--neutral-600)' }}>Loading Blood Bank Portal...</p>
+        <p style={{ marginTop: '1rem', color: 'var(--neutral-600)' }}>Loading Inventory Portal...</p>
       </div>
     );
   }
@@ -692,28 +753,6 @@ const BloodBankDashboard = () => {
         >
           <Building2 size={17} />
           <span>Organization Profile</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('search')}
-          style={{
-            padding: '0.8rem 1.25rem',
-            background: 'none',
-            border: 'none',
-            borderBottom: activeTab === 'search' ? '3px solid var(--primary-600)' : '3px solid transparent',
-            color: activeTab === 'search' ? 'var(--primary-600)' : 'var(--neutral-600)',
-            fontWeight: activeTab === 'search' ? 700 : 500,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.92rem'
-          }}
-          id="tab-search"
-        >
-          <Search size={17} />
-          <span>Live Availability Search Simulator</span>
         </button>
       </div>
 
@@ -1535,7 +1574,7 @@ const BloodBankDashboard = () => {
                           <button
                             type="button"
                             disabled={isLoading || !canFulfillStock}
-                            onClick={() => handleFulfillHospitalRequest(req.id, bloodGrp, req.quantity)}
+                            onClick={() => openFulfillModal(req)}
                             className="btn-primary"
                             style={{
                               padding: '0.6rem 1.3rem',
@@ -1618,201 +1657,527 @@ const BloodBankDashboard = () => {
       {/* =========================================================
           TAB 4: ORGANIZATION PROFILE
           ========================================================= */}
+      {/* =========================================================
+          TAB 4: ORGANIZATION PROFILE
+          ========================================================= */}
       {activeTab === 'profile' && (
-        <div style={{ maxWidth: '680px' }}>
-          <div style={{ marginBottom: '1.25rem' }}>
-            <h2 style={{ fontSize: '1.3rem', fontWeight: 700, margin: 0, color: 'var(--neutral-900)' }}>
-              Blood Bank Facility Profile
-            </h2>
-            <p style={{ color: 'var(--neutral-500)', fontSize: '0.88rem', margin: '0.2rem 0 0' }}>
-              Update facility contact details, address, and operating hours visible to public donors.
+        <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
+          <div style={{ marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+              <Building2 size={20} color="#dc2626" />
+              <h2 style={{ fontSize: '1.45rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                Organization Profile & Security Settings
+              </h2>
+            </div>
+            <p style={{ color: '#64748b', fontSize: '0.9rem', margin: 0 }}>
+              Manage certified facility registration data, contact channels, public directory visibility, and security credentials.
             </p>
           </div>
 
-          <form onSubmit={handleSaveProfile} className="feature-card" style={{ padding: '2rem', margin: 0 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-              <label style={{ fontWeight: 600, fontSize: '0.88rem' }}>
-                Organization Name
-                <input
-                  type="text"
-                  required
-                  value={profileName}
-                  onChange={(e) => setProfileName(e.target.value)}
-                  className="form-input"
-                  style={{ marginTop: '0.25rem' }}
-                />
-              </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.5rem', alignItems: 'start' }}>
+            {/* Left Column: Organization Details & Contact Form */}
+            <form onSubmit={handleSaveProfile} className="feature-card" style={{ padding: '2rem', margin: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '1.25rem' }}>
+                <div style={{ width: '38px', height: '38px', borderRadius: '8px', background: '#fee2e2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Building2 size={20} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                    Facility Information
+                  </h3>
+                  <p style={{ color: '#64748b', fontSize: '0.82rem', margin: '0.15rem 0 0' }}>
+                    Details visible on public registries and hospital networks
+                  </p>
+                </div>
+              </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <label style={{ fontWeight: 600, fontSize: '0.88rem' }}>
-                  City
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
+                <label style={{ fontWeight: 700, fontSize: '0.86rem', color: '#1e293b' }}>
+                  Organization Name <span style={{ color: '#dc2626' }}>*</span>
                   <input
                     type="text"
                     required
-                    value={profileCity}
-                    onChange={(e) => setProfileCity(e.target.value)}
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
                     className="form-input"
-                    style={{ marginTop: '0.25rem' }}
+                    style={{ marginTop: '0.35rem' }}
+                    id="input-bb-name"
                   />
                 </label>
 
-                <label style={{ fontWeight: 600, fontSize: '0.88rem' }}>
-                  Phone Number
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <label style={{ fontWeight: 700, fontSize: '0.86rem', color: '#1e293b' }}>
+                    City <span style={{ color: '#dc2626' }}>*</span>
+                    <input
+                      type="text"
+                      required
+                      value={profileCity}
+                      onChange={(e) => setProfileCity(e.target.value)}
+                      className="form-input"
+                      style={{ marginTop: '0.35rem' }}
+                      id="input-bb-city"
+                    />
+                  </label>
+
+                  <label style={{ fontWeight: 700, fontSize: '0.86rem', color: '#1e293b' }}>
+                    Phone Number <span style={{ color: '#dc2626' }}>*</span>
+                    <input
+                      type="tel"
+                      required
+                      value={profilePhone}
+                      onChange={(e) => setProfilePhone(e.target.value)}
+                      className="form-input"
+                      style={{ marginTop: '0.35rem' }}
+                      id="input-bb-phone"
+                    />
+                  </label>
+                </div>
+
+                <label style={{ fontWeight: 700, fontSize: '0.86rem', color: '#1e293b' }}>
+                  Official Email Address
                   <input
-                    type="tel"
-                    required
-                    value={profilePhone}
-                    onChange={(e) => setProfilePhone(e.target.value)}
+                    type="email"
+                    value={profile?.email || ''}
+                    disabled
                     className="form-input"
-                    style={{ marginTop: '0.25rem' }}
+                    style={{ marginTop: '0.35rem', backgroundColor: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' }}
+                  />
+                  <span style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.2rem', display: 'block' }}>
+                    Official login email cannot be changed directly
+                  </span>
+                </label>
+
+                <label style={{ fontWeight: 700, fontSize: '0.86rem', color: '#1e293b' }}>
+                  Operating Hours <span style={{ color: '#dc2626' }}>*</span>
+                  <input
+                    type="text"
+                    required
+                    value={profileHours}
+                    onChange={(e) => setProfileHours(e.target.value)}
+                    className="form-input"
+                    style={{ marginTop: '0.35rem' }}
+                    placeholder="e.g. 08:00 AM - 08:00 PM"
+                    id="input-bb-hours"
                   />
                 </label>
+
+                <label style={{ fontWeight: 700, fontSize: '0.86rem', color: '#1e293b' }}>
+                  Complete Physical Address <span style={{ color: '#dc2626' }}>*</span>
+                  <textarea
+                    rows={2}
+                    required
+                    value={profileAddress}
+                    onChange={(e) => setProfileAddress(e.target.value)}
+                    className="form-input"
+                    style={{ marginTop: '0.35rem', resize: 'vertical' }}
+                    id="input-bb-address"
+                  />
+                </label>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                  <button
+                    type="submit"
+                    disabled={profileSaving}
+                    className="btn-primary"
+                    style={{ padding: '0.65rem 1.65rem', fontSize: '0.9rem', borderRadius: '8px' }}
+                    id="btn-save-profile"
+                  >
+                    {profileSaving ? 'Saving Changes...' : 'Save Profile Changes'}
+                  </button>
+                </div>
               </div>
+            </form>
 
-              <label style={{ fontWeight: 600, fontSize: '0.88rem' }}>
-                Complete Address
-                <textarea
-                  rows={2}
-                  required
-                  value={profileAddress}
-                  onChange={(e) => setProfileAddress(e.target.value)}
-                  className="form-input"
-                  style={{ marginTop: '0.25rem', resize: 'vertical' }}
-                />
-              </label>
+            {/* Right Column: Password Information & Facility Accreditation */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {/* Dedicated Password Change Card */}
+              <PasswordChangeCard
+                token={token}
+                accountEmail={profile?.email}
+                title="Account Security & Password"
+                subtitle="Update your blood bank facility password and access security"
+              />
 
-              <label style={{ fontWeight: 600, fontSize: '0.88rem' }}>
-                Operating Hours
-                <input
-                  type="text"
-                  required
-                  value={profileHours}
-                  onChange={(e) => setProfileHours(e.target.value)}
-                  className="form-input"
-                  style={{ marginTop: '0.25rem' }}
-                  placeholder="e.g. 08:00 AM - 08:00 PM"
-                />
-              </label>
+              {/* Accreditation & Regulatory Compliance Card */}
+              <div className="feature-card" style={{ padding: '1.75rem 2rem', margin: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '1rem' }}>
+                  <div style={{ width: '38px', height: '38px', borderRadius: '8px', background: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <ShieldCheck size={20} />
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                      Accreditation & Compliance
+                    </h3>
+                    <p style={{ color: '#64748b', fontSize: '0.82rem', margin: '0.15rem 0 0' }}>
+                      Certified healthcare facility verification records
+                    </p>
+                  </div>
+                </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-                <button
-                  type="submit"
-                  disabled={profileSaving}
-                  className="btn-primary"
-                  style={{ padding: '0.65rem 1.5rem', fontSize: '0.9rem' }}
-                  id="btn-save-profile"
-                >
-                  {profileSaving ? 'Saving Changes...' : 'Save Profile'}
-                </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem' }}>
+                    <CheckCircle2 size={17} color="#059669" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <div style={{ fontSize: '0.86rem', color: '#334155' }}>
+                      <strong>State Blood Transfusion Council (SBTC)</strong>
+                      <span style={{ display: 'block', color: '#64748b', fontSize: '0.78rem' }}>Accredited blood collection & component separation facility.</span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem' }}>
+                    <CheckCircle2 size={17} color="#059669" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <div style={{ fontSize: '0.86rem', color: '#334155' }}>
+                      <strong>Continuous Cold Chain Monitoring</strong>
+                      <span style={{ display: 'block', color: '#64748b', fontSize: '0.78rem' }}>Automated temperature tracking (2°C - 6°C) compliant.</span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem' }}>
+                    <CheckCircle2 size={17} color="#059669" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <div style={{ fontSize: '0.86rem', color: '#334155' }}>
+                      <strong>Hospital Emergency Requisition Ready</strong>
+                      <span style={{ display: 'block', color: '#64748b', fontSize: '0.78rem' }}>Priority dispatch coordination active with regional healthcare networks.</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          </form>
+          </div>
         </div>
       )}
-
-      {/* =========================================================
-          TAB 4: PUBLIC DIRECTORY & BLOOD AVAILABILITY SEARCH
-          ========================================================= */}
-      {activeTab === 'search' && (
-        <div style={{ maxWidth: '800px' }}>
-          <div style={{ marginBottom: '1.25rem' }}>
-            <h2 style={{ fontSize: '1.3rem', fontWeight: 700, margin: 0, color: 'var(--neutral-900)' }}>
-              Public Availability Simulator
-            </h2>
-            <p style={{ color: 'var(--neutral-500)', fontSize: '0.88rem', margin: '0.2rem 0 0' }}>
-              Preview how your facility appears when donors and partner hospitals search for blood across cities.
-            </p>
-          </div>
-
+      {/* Custom LifeFlow Blood Fulfillment Confirmation Modal */}
+      {fulfillModalTarget && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(5px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+            zIndex: 1100
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isFulfilling) {
+              closeFulfillModal();
+            }
+          }}
+          id="modal-fulfill-backdrop"
+        >
           <div
             className="feature-card"
             style={{
-              padding: '1.5rem',
-              margin: '0 0 1.5rem',
-              backgroundColor: 'white',
-              border: '1px solid var(--neutral-200)'
+              backgroundColor: '#ffffff',
+              borderRadius: '16px',
+              maxWidth: '480px',
+              width: '100%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              border: '1px solid var(--neutral-200)',
+              position: 'relative',
+              padding: 0
             }}
+            id="modal-confirm-blood-fulfillment"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="modal-fulfill-title"
           >
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
-              <div>
-                <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--neutral-700)' }}>City</label>
-                <input
-                  type="text"
-                  value={searchCity}
-                  onChange={(e) => setSearchCity(e.target.value)}
-                  className="form-input"
-                  style={{ marginTop: '0.25rem' }}
-                />
-              </div>
+            {/* Close Button */}
+            <button
+              type="button"
+              onClick={closeFulfillModal}
+              disabled={isFulfilling}
+              style={{
+                position: 'absolute',
+                top: '1.15rem',
+                right: '1.15rem',
+                background: 'none',
+                border: 'none',
+                cursor: isFulfilling ? 'not-allowed' : 'pointer',
+                color: 'var(--neutral-400)',
+                padding: '4px',
+                borderRadius: '6px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+              id="btn-close-fulfill-modal"
+              aria-label="Close modal"
+            >
+              <X size={20} />
+            </button>
 
-              <div>
-                <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--neutral-700)' }}>Blood Group</label>
-                <select
-                  value={searchGroup}
-                  onChange={(e) => setSearchGroup(e.target.value as BloodGroup)}
-                  className="form-input"
-                  style={{ marginTop: '0.25rem' }}
+            {/* Modal Header */}
+            <div style={{ padding: '1.75rem 1.75rem 0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <div
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '10px',
+                    backgroundColor: '#fee2e2',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#dc2626',
+                    flexShrink: 0
+                  }}
                 >
-                  {ALL_BLOOD_GROUPS.map((bg) => (
-                    <option key={bg} value={bg}>
-                      {bg}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--neutral-700)' }}>Min Required Quantity</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={searchQty}
-                  onChange={(e) => setSearchQty(parseInt(e.target.value, 10) || 1)}
-                  className="form-input"
-                  style={{ marginTop: '0.25rem' }}
-                />
+                  <Droplets size={20} />
+                </div>
+                <h2
+                  id="modal-fulfill-title"
+                  style={{
+                    fontSize: '1.3rem',
+                    fontWeight: 800,
+                    color: 'var(--neutral-900)',
+                    margin: 0
+                  }}
+                >
+                  Confirm Blood Fulfillment
+                </h2>
               </div>
             </div>
-          </div>
 
-          <div className="feature-card" style={{ padding: '1.5rem', margin: 0 }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '0.75rem' }}>
-              Your Facility Listing in Search Results
-            </h3>
+            {/* Modal Body */}
+            <div style={{ padding: '0.5rem 1.75rem 1.25rem' }}>
+              {/* Hospital Name Box */}
+              <div
+                style={{
+                  backgroundColor: 'var(--neutral-50)',
+                  border: '1px solid var(--neutral-200)',
+                  borderRadius: '10px',
+                  padding: '0.85rem 1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: '1.15rem'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+                  <Building2 size={18} color="var(--neutral-600)" />
+                  <span
+                    style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--neutral-900)' }}
+                    id="modal-fulfill-hospital-name"
+                  >
+                    {fulfillModalTarget.request.hospital_name || fulfillModalTarget.request.hospitalName || 'Hospital'}
+                  </span>
+                </div>
+                {fulfillModalTarget.request.urgency && (
+                  <span
+                    style={{
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      padding: '0.15rem 0.55rem',
+                      borderRadius: '12px',
+                      backgroundColor:
+                        (fulfillModalTarget.request.urgency || '').toUpperCase() === 'CRITICAL' ||
+                        (fulfillModalTarget.request.urgency || '').toUpperCase() === 'URGENT'
+                          ? '#fee2e2'
+                          : '#ffedd5',
+                      color:
+                        (fulfillModalTarget.request.urgency || '').toUpperCase() === 'CRITICAL' ||
+                        (fulfillModalTarget.request.urgency || '').toUpperCase() === 'URGENT'
+                          ? '#b91c1c'
+                          : '#c2410c'
+                    }}
+                  >
+                    {fulfillModalTarget.request.urgency}
+                  </span>
+                )}
+              </div>
 
+              {/* Data Table / Key Details Card */}
+              <div
+                style={{
+                  backgroundColor: '#ffffff',
+                  border: '1px solid var(--neutral-200)',
+                  borderRadius: '10px',
+                  overflow: 'hidden',
+                  marginBottom: '1.15rem'
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '0.75rem 1rem',
+                    borderBottom: '1px solid var(--neutral-100)'
+                  }}
+                >
+                  <span style={{ color: 'var(--neutral-600)', fontSize: '0.9rem', fontWeight: 600 }}>Blood Group</span>
+                  <span
+                    style={{
+                      backgroundColor: '#fee2e2',
+                      color: '#dc2626',
+                      fontWeight: 800,
+                      fontSize: '0.95rem',
+                      padding: '0.2rem 0.65rem',
+                      borderRadius: '6px'
+                    }}
+                    id="modal-fulfill-blood-group"
+                  >
+                    {fulfillModalTarget.bloodGroup}
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '0.75rem 1rem',
+                    borderBottom: '1px solid var(--neutral-100)'
+                  }}
+                >
+                  <span style={{ color: 'var(--neutral-600)', fontSize: '0.9rem', fontWeight: 600 }}>Requested</span>
+                  <span style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--neutral-900)' }} id="modal-fulfill-requested-qty">
+                    {fulfillModalTarget.requestedQuantity} {fulfillModalTarget.requestedQuantity === 1 ? 'unit' : 'units'}
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '0.75rem 1rem',
+                    borderBottom: '1px solid var(--neutral-100)'
+                  }}
+                >
+                  <span style={{ color: 'var(--neutral-600)', fontSize: '0.9rem', fontWeight: 600 }}>Current Stock</span>
+                  <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--neutral-800)' }} id="modal-fulfill-current-stock">
+                    {fulfillModalTarget.currentStock} {fulfillModalTarget.currentStock === 1 ? 'unit' : 'units'}
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '0.75rem 1rem',
+                    backgroundColor: '#f8fafc'
+                  }}
+                >
+                  <span style={{ color: 'var(--neutral-700)', fontSize: '0.9rem', fontWeight: 700 }}>Remaining Stock</span>
+                  <span
+                    style={{
+                      fontWeight: 800,
+                      fontSize: '0.95rem',
+                      color: fulfillModalTarget.remainingStock > 2 ? '#15803d' : '#b45309'
+                    }}
+                    id="modal-fulfill-remaining-stock"
+                  >
+                    {fulfillModalTarget.remainingStock} {fulfillModalTarget.remainingStock === 1 ? 'unit' : 'units'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Warning Notice */}
+              <div
+                style={{
+                  backgroundColor: '#fffbeb',
+                  border: '1px solid #fef3c7',
+                  borderRadius: '10px',
+                  padding: '0.85rem 1rem',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '0.65rem'
+                }}
+                id="modal-fulfill-warning"
+              >
+                <AlertTriangle size={18} color="#d97706" style={{ flexShrink: 0, marginTop: '2px' }} />
+                <p style={{ margin: 0, fontSize: '0.86rem', color: '#92400e', lineHeight: 1.45 }}>
+                  This action will deduct {fulfillModalTarget.requestedQuantity} {fulfillModalTarget.requestedQuantity === 1 ? 'unit' : 'units'} from your available inventory and mark this request as fulfilled.
+                </p>
+              </div>
+
+              {/* Error Alert (if backend returns failure) */}
+              {fulfillError && (
+                <div
+                  style={{
+                    backgroundColor: '#fee2e2',
+                    border: '1px solid #fecaca',
+                    borderRadius: '8px',
+                    padding: '0.75rem 1rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    color: '#dc2626',
+                    fontSize: '0.86rem',
+                    marginTop: '0.85rem'
+                  }}
+                  id="modal-fulfill-error"
+                >
+                  <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                  <span>{fulfillError}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
             <div
               style={{
-                border: '1px solid var(--neutral-200)',
-                borderRadius: '12px',
-                padding: '1.25rem',
+                padding: '1rem 1.75rem 1.75rem',
                 display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '1rem'
+                justifyContent: 'flex-end',
+                gap: '0.75rem',
+                backgroundColor: '#ffffff',
+                borderTop: '1px solid var(--neutral-100)'
               }}
             >
-              <div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--neutral-900)' }}>
-                  {profile?.organizationName || profile?.name}
-                </div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--neutral-600)', marginTop: '0.2rem' }}>
-                  {profile?.fullAddress || profile?.address}
-                </div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--neutral-500)', marginTop: '0.2rem' }}>
-                  📞 {profile?.phone || 'Contact provided'} &bull; 🕒 {profile?.openingHours || 'Hours provided'}
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={closeFulfillModal}
+                disabled={isFulfilling}
+                className="btn-secondary"
+                style={{
+                  padding: '0.65rem 1.25rem',
+                  fontSize: '0.9rem',
+                  borderRadius: '8px',
+                  cursor: isFulfilling ? 'not-allowed' : 'pointer'
+                }}
+                id="btn-cancel-fulfillment"
+              >
+                Cancel
+              </button>
 
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '0.8rem', color: 'var(--neutral-500)', fontWeight: 600 }}>AVAILABLE STOCK</div>
-                <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--primary-600)' }}>
-                  {inventory.find((i) => i.bloodGroup === searchGroup)?.quantity ?? 0} units
-                </div>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--neutral-600)' }}>
-                  Group {searchGroup}
-                </span>
-              </div>
+              <button
+                type="button"
+                onClick={handleConfirmFulfillment}
+                disabled={isFulfilling}
+                className="btn-primary"
+                style={{
+                  padding: '0.65rem 1.5rem',
+                  fontSize: '0.9rem',
+                  borderRadius: '8px',
+                  backgroundColor: '#16a34a',
+                  borderColor: '#16a34a',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  cursor: isFulfilling ? 'not-allowed' : 'pointer',
+                  boxShadow: 'var(--shadow-md)',
+                  opacity: isFulfilling ? 0.75 : 1
+                }}
+                id="btn-confirm-fulfillment"
+              >
+                {isFulfilling ? (
+                  <>
+                    <RefreshCw className="animate-spin" size={16} />
+                    <span>Fulfilling Order...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check size={18} />
+                    <span>Confirm Fulfillment</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

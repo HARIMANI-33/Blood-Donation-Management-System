@@ -4,6 +4,7 @@ import { createUser, findUserByEmail, findUserById, toPublicUser, BloodGroup, Us
 import { signToken } from '../utils/jwt';
 import { AuthenticatedRequest } from '../middleware/auth';
 import { config } from '../config/environment';
+import { query } from '../config/database';
 
 const VALID_BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 const VALID_ROLES: UserRole[] = ['donor', 'hospital', 'staff', 'admin', 'blood_bank'];
@@ -256,6 +257,76 @@ export const googleAuth = async (req: Request, res: Response): Promise<void> => 
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     res.status(500).json({ success: false, message: 'Google authentication failed', error: message });
+  }
+};
+
+/**
+ * POST /api/auth/change-password
+ * Requires authentication middleware.
+ * Verifies current password (if user already has a password) and updates password hash.
+ */
+export const changePassword = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, message: 'Authentication required' });
+      return;
+    }
+
+    const { currentPassword, newPassword } = req.body ?? {};
+
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+      res.status(400).json({
+        success: false,
+        message: 'New password must be at least 6 characters long'
+      });
+      return;
+    }
+
+    const user = await findUserById(userId);
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User account not found' });
+      return;
+    }
+
+    // If user has an existing password_hash, verify currentPassword
+    if (user.password_hash) {
+      if (!currentPassword) {
+        res.status(400).json({
+          success: false,
+          message: 'Current password is required to change password'
+        });
+        return;
+      }
+
+      const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
+      if (!isMatch) {
+        res.status(400).json({
+          success: false,
+          message: 'Current password is incorrect'
+        });
+        return;
+      }
+    }
+
+    // Hash the new password
+    const newPasswordHash = await bcrypt.hash(newPassword, 10);
+
+    await query(
+      `UPDATE users
+       SET password_hash = $1,
+           updated_at = now()
+       WHERE id = $2`,
+      [newPasswordHash, userId]
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Password updated successfully'
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ success: false, message: 'Failed to update password', error: message });
   }
 };
 

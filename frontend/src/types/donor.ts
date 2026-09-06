@@ -10,6 +10,7 @@ export interface BloodBank {
   operating_hours: string | null;
   type?: 'BLOOD_BANK' | 'HOSPITAL' | 'DONATION_CENTER' | string;
   is_donation_capable?: boolean;
+  source?: 'LIVE' | 'DEMO';
 }
 
 export type AppointmentStatus = 'PENDING' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED';
@@ -28,6 +29,18 @@ export interface Appointment {
   blood_bank_address?: string;
   blood_bank_city?: string;
   blood_bank_phone?: string;
+  blood_bank_operating_hours?: string | null;
+  blood_bank_type?: string | null;
+  blood_group?: string;
+  organizationId?: string;
+  organizationName?: string;
+  bloodBankId?: string;
+  bloodBankName?: string;
+  bloodBankAddress?: string;
+  bloodBankCity?: string;
+  bloodBankPhone?: string;
+  appointmentDate?: string;
+  appointmentTime?: string;
 }
 
 export interface BookAppointmentInput {
@@ -89,6 +102,14 @@ export interface AppointmentsResponse {
   success: boolean;
   data: {
     appointments: Appointment[];
+    upcomingAppointment?: Appointment | null;
+  };
+}
+
+export interface UpcomingAppointmentResponse {
+  success: boolean;
+  data: {
+    upcomingAppointment: Appointment | null;
   };
 }
 

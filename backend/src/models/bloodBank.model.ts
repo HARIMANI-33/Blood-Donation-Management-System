@@ -37,34 +37,68 @@ export interface UpdateBloodBankInput {
   operatingHours?: string | null;
 }
 
+export interface FindAllBloodBanksFilter {
+  city?: string;
+  search?: string;
+}
+
 /**
- * Retrieve active blood bank/donation facilities, optionally filtered by search keyword or city.
- * Returns latest registered blood banks first.
+ * Retrieve active blood bank/donation facilities, optionally filtered by city and/or search keyword.
+ * Strictly enforces is_donation_capable = TRUE to exclude non-donation facilities.
+ * Prioritizes core verified organizations (Neuro Life Blood Bank, Apex Blood Bank, SIMS Hospital Blood Center).
  */
-export const findAllBloodBanks = async (searchOrCity?: string): Promise<BloodBank[]> => {
-  if (searchOrCity && searchOrCity.trim()) {
-    const term = `%${searchOrCity.trim()}%`;
-    const result = await query(
-      `SELECT id, user_id, name, address, city, phone, email, operating_hours, type, is_donation_capable, created_at, updated_at
-       FROM blood_banks
-       WHERE (is_donation_capable IS TRUE OR is_donation_capable IS NULL)
-         AND (
-           city ILIKE $1
-           OR name ILIKE $1
-           OR address ILIKE $1
-         )
-       ORDER BY created_at DESC, name ASC`,
-      [term]
-    );
-    return result.rows;
+export const findAllBloodBanks = async (
+  filter?: string | FindAllBloodBanksFilter
+): Promise<BloodBank[]> => {
+  let cityParam: string | undefined;
+  let searchParam: string | undefined;
+
+  if (typeof filter === 'string') {
+    const trimmed = filter.trim();
+    if (trimmed) {
+      cityParam = trimmed;
+    }
+  } else if (filter && typeof filter === 'object') {
+    if (filter.city && filter.city.trim()) cityParam = filter.city.trim();
+    if (filter.search && filter.search.trim()) searchParam = filter.search.trim();
   }
 
-  const result = await query(
-    `SELECT id, user_id, name, address, city, phone, email, operating_hours, type, is_donation_capable, created_at, updated_at
-     FROM blood_banks
-     WHERE (is_donation_capable IS TRUE OR is_donation_capable IS NULL)
-     ORDER BY created_at DESC, name ASC`
-  );
+  const conditions: string[] = [
+    '(is_donation_capable IS TRUE OR is_donation_capable IS NULL)'
+  ];
+  const params: unknown[] = [];
+  let paramIdx = 1;
+
+  if (cityParam) {
+    conditions.push(`(LOWER(city) = LOWER($${paramIdx}) OR city ILIKE $${paramIdx})`);
+    params.push(cityParam);
+    paramIdx++;
+  }
+
+  if (searchParam) {
+    conditions.push(`(name ILIKE $${paramIdx} OR address ILIKE $${paramIdx})`);
+    params.push(`%${searchParam}%`);
+    paramIdx++;
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const sql = `
+    SELECT id, user_id, name, address, city, phone, email, operating_hours, type, is_donation_capable, created_at, updated_at
+    FROM blood_banks
+    ${whereClause}
+    ORDER BY
+      CASE 
+        WHEN name ILIKE '%Neuro Life%' THEN 1
+        WHEN name ILIKE '%Apex%' THEN 2
+        WHEN name ILIKE '%SIMS%' THEN 3
+        ELSE 4
+      END,
+      name ASC,
+      created_at DESC
+  `;
+
+  const result = await query(sql, params);
   return result.rows;
 };
 

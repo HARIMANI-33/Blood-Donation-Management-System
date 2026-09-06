@@ -70,6 +70,45 @@ export const createBloodRequest = async (input: CreateBloodRequestInput): Promis
 };
 
 /**
+ * Find an active blood request (PENDING or ACCEPTED) between a specific hospital and blood bank.
+ */
+export const findActiveBloodRequest = async (
+  hospitalId: string,
+  bloodBankId: string,
+  userId?: string
+): Promise<BloodRequest | null> => {
+  const result = await query(
+    `SELECT
+       r.id,
+       r.hospital_id,
+       r.blood_bank_id,
+       r.blood_group,
+       r.quantity,
+       r.urgency,
+       r.message,
+       r.notes,
+       r.required_date,
+       r.patient_name,
+       r.status,
+       r.created_at,
+       r.updated_at,
+       bb.name AS blood_bank_name,
+       bb.city AS blood_bank_city,
+       bb.phone AS blood_bank_phone,
+       bb.address AS blood_bank_address
+     FROM blood_requests r
+     LEFT JOIN blood_banks bb ON r.blood_bank_id = bb.id
+     WHERE (r.hospital_id = $1 OR ($3::uuid IS NOT NULL AND r.hospital_id = $3::uuid))
+       AND r.blood_bank_id = $2
+       AND r.status IN ('PENDING', 'ACCEPTED')
+     ORDER BY r.created_at DESC
+     LIMIT 1`,
+    [hospitalId, bloodBankId, userId ?? null]
+  );
+  return result.rows[0] ?? null;
+};
+
+/**
  * Retrieve all blood requests created by a specific hospital.
  */
 export const findBloodRequestsByHospital = async (
