@@ -12,6 +12,7 @@ interface AuthContextValue {
   login: (input: LoginInput) => Promise<void>;
   register: (input: RegisterInput) => Promise<void>;
   googleLogin: (payload: { token?: string; credential?: string; accessToken?: string; access_token?: string }) => Promise<void>;
+  loginWithSession: (sessionUser: User, sessionToken: string) => void;
   updateUser: (updatedUser: User) => void;
   logout: () => void;
 }
@@ -83,6 +84,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     persist(response.data.user, response.data.token);
   }, []);
 
+  const loginWithSession = useCallback((sessionUser: User, sessionToken: string) => {
+    setIsNewRegistration(true);
+    sessionStorage.setItem('lifeflow_is_new_reg', 'true');
+    persist(sessionUser, sessionToken);
+  }, []);
+
   const updateUser = useCallback((updatedUser: User) => {
     setUser(updatedUser);
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -115,6 +122,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         login,
         register,
         googleLogin,
+        loginWithSession,
         updateUser,
         logout
       }}

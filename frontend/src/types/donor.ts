@@ -32,8 +32,10 @@ export interface Appointment {
 
 export interface BookAppointmentInput {
   bloodBankId: string;
+  organizationId?: string;
   appointmentDate: string;
   appointmentTime: string;
+  bloodGroup?: string;
   notes?: string;
 }
 

@@ -1,6 +1,7 @@
 import { query } from '../config/database';
+import { PoolClient } from 'pg';
 
-export type AppointmentStatus = 'PENDING' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED';
+export type AppointmentStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED' | 'COMPLETED' | 'CANCELLED';
 
 export interface Appointment {
   id: string;
@@ -10,6 +11,7 @@ export interface Appointment {
   appointment_time: string;
   status: AppointmentStatus;
   notes: string | null;
+  blood_group?: string | null;
   created_at: string;
   updated_at: string;
   blood_bank_name?: string;
@@ -18,12 +20,30 @@ export interface Appointment {
   blood_bank_phone?: string;
 }
 
+export interface BloodBankAppointmentItem {
+  id: string;
+  donor_id: string;
+  donor_name: string;
+  donor_email: string;
+  donor_phone: string | null;
+  donor_blood_group: string | null;
+  donor_city: string | null;
+  appointment_date: string;
+  appointment_time: string;
+  status: AppointmentStatus;
+  notes: string | null;
+  blood_group?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CreateAppointmentInput {
   donorId: string;
   bloodBankId: string;
   appointmentDate: string; // YYYY-MM-DD
   appointmentTime: string; // e.g. "10:30 AM" or "10:30"
   notes?: string | null;
+  bloodGroup?: string | null;
 }
 
 /**
@@ -65,14 +85,21 @@ export const findUpcomingAppointmentForDonor = async (donorId: string): Promise<
 };
 
 /**
- * Create a new donation appointment.
+ * Create a new donation appointment (starts in PENDING state awaiting blood bank review).
  */
 export const createAppointment = async (input: CreateAppointmentInput): Promise<Appointment> => {
   const result = await query(
-    `INSERT INTO appointments (donor_id, blood_bank_id, appointment_date, appointment_time, status, notes)
-     VALUES ($1, $2, $3, $4, 'CONFIRMED', $5)
+    `INSERT INTO appointments (donor_id, blood_bank_id, appointment_date, appointment_time, status, notes, blood_group)
+     VALUES ($1, $2, $3, $4, 'PENDING', $5, $6)
      RETURNING *`,
-    [input.donorId, input.bloodBankId, input.appointmentDate, input.appointmentTime, input.notes ?? null]
+    [
+      input.donorId,
+      input.bloodBankId,
+      input.appointmentDate,
+      input.appointmentTime,
+      input.notes ?? null,
+      input.bloodGroup ?? null
+    ]
   );
   return result.rows[0];
 };
@@ -125,6 +152,101 @@ export const cancelAppointment = async (id: string, donorId: string): Promise<Ap
      WHERE id = $1 AND donor_id = $2 AND status IN ('PENDING', 'CONFIRMED')
      RETURNING *`,
     [id, donorId]
+  );
+  return result.rows[0] ?? null;
+};
+
+/**
+ * List all appointments belonging to a specific blood bank, with non-sensitive donor details.
+ */
+export const findAppointmentsByBloodBank = async (
+  bloodBankId: string,
+  statusFilter?: string
+): Promise<BloodBankAppointmentItem[]> => {
+  let whereClause = 'WHERE a.blood_bank_id = $1';
+  const params: unknown[] = [bloodBankId];
+
+  if (statusFilter && statusFilter.trim()) {
+    params.push(statusFilter.trim().toUpperCase());
+    whereClause += ` AND a.status = $2`;
+  }
+
+  const sql = `
+    SELECT
+      a.id,
+      a.donor_id,
+      u.name AS donor_name,
+      u.email AS donor_email,
+      u.phone AS donor_phone,
+      COALESCE(a.blood_group, u.blood_group) AS donor_blood_group,
+      a.blood_group,
+      u.city AS donor_city,
+      TO_CHAR(a.appointment_date, 'YYYY-MM-DD') AS appointment_date,
+      a.appointment_time,
+      a.status,
+      a.notes,
+      a.created_at,
+      a.updated_at
+    FROM appointments a
+    JOIN users u ON a.donor_id = u.id
+    ${whereClause}
+    ORDER BY a.appointment_date DESC, a.appointment_time DESC
+  `;
+
+  const result = await query(sql, params);
+  return result.rows;
+};
+
+/**
+ * Find single appointment by ID belonging to a specific blood bank.
+ */
+export const findAppointmentByIdForBloodBank = async (
+  appointmentId: string,
+  bloodBankId: string,
+  client?: PoolClient
+): Promise<BloodBankAppointmentItem | null> => {
+  const runner = client ? client.query.bind(client) : query;
+  const sql = `
+    SELECT
+      a.id,
+      a.donor_id,
+      u.name AS donor_name,
+      u.email AS donor_email,
+      u.phone AS donor_phone,
+      COALESCE(a.blood_group, u.blood_group) AS donor_blood_group,
+      a.blood_group,
+      u.city AS donor_city,
+      TO_CHAR(a.appointment_date, 'YYYY-MM-DD') AS appointment_date,
+      a.appointment_time,
+      a.status,
+      a.notes,
+      a.created_at,
+      a.updated_at
+    FROM appointments a
+    JOIN users u ON a.donor_id = u.id
+    WHERE a.id = $1 AND a.blood_bank_id = $2
+    LIMIT 1
+  `;
+  const result = await runner(sql, [appointmentId, bloodBankId]);
+  return result.rows[0] ?? null;
+};
+
+/**
+ * Update appointment status (only if it belongs to the authenticated blood bank).
+ */
+export const updateAppointmentStatus = async (
+  appointmentId: string,
+  bloodBankId: string,
+  status: AppointmentStatus,
+  client?: PoolClient
+): Promise<Appointment | null> => {
+  const runner = client ? client.query.bind(client) : query;
+  const result = await runner(
+    `UPDATE appointments
+     SET status = $1, updated_at = now()
+     WHERE id = $2 AND blood_bank_id = $3
+     RETURNING *`,
+    [status, appointmentId, bloodBankId]
   );
   return result.rows[0] ?? null;
 };

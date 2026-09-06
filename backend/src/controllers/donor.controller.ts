@@ -20,6 +20,31 @@ const VALID_BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 
 const WHOLE_BLOOD_WAITING_PERIOD_DAYS = 90;
 
 /**
+ * Format Date object or timestamp string to YYYY-MM-DD
+ */
+const toIsoDateString = (dateInput: Date | string): string => {
+  if (dateInput instanceof Date) {
+    const year = dateInput.getFullYear();
+    const month = String(dateInput.getMonth() + 1).padStart(2, '0');
+    const day = String(dateInput.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  return String(dateInput).split('T')[0];
+};
+
+/**
+ * Add days to YYYY-MM-DD string and return new YYYY-MM-DD string
+ */
+const addDaysToIsoDate = (isoDateStr: string, days: number): string => {
+  const [y, m, d] = isoDateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + days);
+  const year = dt.getFullYear();
+  const month = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+/**
  * GET /api/donor/profile
  * Get authenticated donor's own profile.
  */
@@ -120,8 +145,12 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response): P
  */
 export const getBloodBanks = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const city = typeof req.query.city === 'string' ? req.query.city : undefined;
-    const bloodBanks = await findAllBloodBanks(city);
+    const search = typeof req.query.search === 'string'
+      ? req.query.search
+      : typeof req.query.city === 'string'
+      ? req.query.city
+      : undefined;
+    const bloodBanks = await findAllBloodBanks(search);
     res.status(200).json({
       success: true,
       data: { bloodBanks }
@@ -144,16 +173,17 @@ export const bookAppointment = async (req: AuthenticatedRequest, res: Response):
       return;
     }
 
-    const { bloodBankId, appointmentDate, appointmentTime, notes } = req.body ?? {};
+    const { bloodBankId, organizationId, facilityId, appointmentDate, appointmentTime, bloodGroup, notes } = req.body ?? {};
+    const targetOrgId = organizationId || bloodBankId || facilityId;
 
-    // 1. Validate blood bank
-    if (!bloodBankId || typeof bloodBankId !== 'string') {
-      res.status(400).json({ success: false, message: 'Please select a donation center / blood bank' });
+    // 1. Validate organization / blood bank
+    if (!targetOrgId || typeof targetOrgId !== 'string' || !targetOrgId.trim()) {
+      res.status(400).json({ success: false, message: 'Please select a donation center / organization' });
       return;
     }
-    const bloodBank = await findBloodBankById(bloodBankId);
+    const bloodBank = await findBloodBankById(targetOrgId.trim());
     if (!bloodBank) {
-      res.status(404).json({ success: false, message: 'Selected blood bank does not exist' });
+      res.status(404).json({ success: false, message: 'Selected donation center / organization does not exist' });
       return;
     }
 
@@ -162,20 +192,30 @@ export const bookAppointment = async (req: AuthenticatedRequest, res: Response):
       res.status(400).json({ success: false, message: 'Appointment date is required (YYYY-MM-DD)' });
       return;
     }
-    const parsedDate = new Date(appointmentDate);
-    if (isNaN(parsedDate.getTime())) {
-      res.status(400).json({ success: false, message: 'Invalid appointment date format' });
+    const todayStr = toIsoDateString(new Date());
+    if (appointmentDate < todayStr) {
+      res.status(400).json({ success: false, message: 'Appointment date cannot be in the past' });
       return;
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const appointmentDateObj = new Date(appointmentDate);
-    appointmentDateObj.setHours(0, 0, 0, 0);
+    // Check mandatory recovery waiting period from previous completed donation
+    const latestDonation = await getLatestCompletedDonation(donorId);
+    if (latestDonation?.donation_date) {
+      const lastDonationDateStr = toIsoDateString(latestDonation.donation_date);
+      const eligibleDateStr = addDaysToIsoDate(lastDonationDateStr, WHOLE_BLOOD_WAITING_PERIOD_DAYS);
 
-    if (appointmentDateObj < today) {
-      res.status(400).json({ success: false, message: 'Appointment date cannot be in the past' });
-      return;
+      if (appointmentDate < eligibleDateStr) {
+        res.status(400).json({
+          success: false,
+          message: `You cannot schedule an appointment before your next eligible date. Your previous donation was on ${lastDonationDateStr}. You are eligible to donate again on ${eligibleDateStr}.`,
+          data: {
+            previousDonationDate: lastDonationDateStr,
+            lastDonationDate: lastDonationDateStr,
+            nextEligibleDate: eligibleDateStr
+          }
+        });
+        return;
+      }
     }
 
     // 3. Validate appointment time
@@ -194,13 +234,18 @@ export const bookAppointment = async (req: AuthenticatedRequest, res: Response):
       return;
     }
 
-    // 5. Create appointment
+    // 5. Determine blood group (from payload or donor user record)
+    const donor = await findUserById(donorId);
+    const donorBloodGroup = bloodGroup ? String(bloodGroup).trim() : (donor?.blood_group ?? null);
+
+    // 6. Create appointment explicitly linked to the selected organization
     const appointment = await createAppointment({
       donorId,
-      bloodBankId,
+      bloodBankId: bloodBank.id,
       appointmentDate,
       appointmentTime: appointmentTime.trim(),
-      notes: notes ? String(notes).trim() : null
+      notes: notes ? String(notes).trim() : null,
+      bloodGroup: donorBloodGroup
     });
 
     res.status(201).json({
@@ -209,9 +254,13 @@ export const bookAppointment = async (req: AuthenticatedRequest, res: Response):
       data: {
         appointment: {
           ...appointment,
+          organizationId: bloodBank.id,
+          bloodBankId: bloodBank.id,
+          organizationName: bloodBank.name,
           bloodBankName: bloodBank.name,
           bloodBankAddress: bloodBank.address,
-          bloodBankCity: bloodBank.city
+          bloodBankCity: bloodBank.city,
+          bloodBankPhone: bloodBank.phone
         }
       }
     });
@@ -379,24 +428,23 @@ export const getEligibilityStatus = async (req: AuthenticatedRequest, res: Respo
     const latestDonation = await getLatestCompletedDonation(donorId);
     const upcomingAppointment = await findUpcomingAppointmentForDonor(donorId);
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const todayStr = toIsoDateString(new Date());
 
     let isEligible = true;
-    let nextEligibleDate = today.toISOString().split('T')[0];
+    let nextEligibleDate = todayStr;
     let daysRemaining = 0;
     let statusMessage = 'You are eligible to donate blood.';
 
     if (latestDonation?.donation_date) {
-      const lastDonationDate = new Date(latestDonation.donation_date);
-      lastDonationDate.setHours(0, 0, 0, 0);
+      const lastDonationDateStr = toIsoDateString(latestDonation.donation_date);
+      nextEligibleDate = addDaysToIsoDate(lastDonationDateStr, WHOLE_BLOOD_WAITING_PERIOD_DAYS);
 
-      const eligibleDate = new Date(lastDonationDate);
-      eligibleDate.setDate(eligibleDate.getDate() + WHOLE_BLOOD_WAITING_PERIOD_DAYS);
+      const [ty, tm, td] = todayStr.split('-').map(Number);
+      const [ey, em, ed] = nextEligibleDate.split('-').map(Number);
+      const todayMs = new Date(ty, tm - 1, td).getTime();
+      const eligibleMs = new Date(ey, em - 1, ed).getTime();
 
-      nextEligibleDate = eligibleDate.toISOString().split('T')[0];
-
-      const diffMs = eligibleDate.getTime() - today.getTime();
+      const diffMs = eligibleMs - todayMs;
       const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
       if (diffDays > 0) {
@@ -417,7 +465,7 @@ export const getEligibilityStatus = async (req: AuthenticatedRequest, res: Respo
         nextEligibleDate,
         daysRemaining,
         statusMessage,
-        lastDonationDate: latestDonation?.donation_date ?? null,
+        lastDonationDate: latestDonation?.donation_date ? toIsoDateString(latestDonation.donation_date) : null,
         hasUpcomingAppointment: !!upcomingAppointment,
         upcomingAppointment: upcomingAppointment ?? null
       }

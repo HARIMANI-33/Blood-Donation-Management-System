@@ -55,3 +55,14 @@ export const requireRole = (...roles: string[]) => {
  */
 export const requireDonor = requireRole('donor', 'admin');
 
+/**
+ * Middleware ensuring the authenticated user is a blood bank (or admin).
+ */
+export const requireBloodBank = requireRole('blood_bank', 'admin');
+
+/**
+ * Middleware ensuring the authenticated user is a hospital (or admin).
+ */
+export const requireHospital = requireRole('hospital', 'admin');
+
+

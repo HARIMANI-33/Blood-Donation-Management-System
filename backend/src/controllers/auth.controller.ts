@@ -6,7 +6,7 @@ import { AuthenticatedRequest } from '../middleware/auth';
 import { config } from '../config/environment';
 
 const VALID_BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-const VALID_ROLES: UserRole[] = ['donor', 'hospital', 'staff', 'admin'];
+const VALID_ROLES: UserRole[] = ['donor', 'hospital', 'staff', 'admin', 'blood_bank'];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**

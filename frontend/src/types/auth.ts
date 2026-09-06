@@ -1,5 +1,5 @@
 export type BloodGroup = 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-';
-export type UserRole = 'donor' | 'hospital' | 'staff' | 'admin';
+export type UserRole = 'donor' | 'hospital' | 'staff' | 'admin' | 'blood_bank';
 
 export interface User {
   id: string;

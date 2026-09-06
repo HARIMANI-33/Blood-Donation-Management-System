@@ -4,7 +4,9 @@ export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
     super(message);
+    this.name = 'ApiError';
     this.status = status;
+    Object.setPrototypeOf(this, ApiError.prototype);
   }
 }
 
@@ -28,11 +30,20 @@ export const apiRequest = async <T>(path: string, options: RequestOptions = {}):
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined
+    });
+  } catch (netErr: unknown) {
+    const errorDetail = netErr instanceof Error ? netErr.message : 'Network error';
+    throw new ApiError(
+      `Cannot connect to backend server at ${API_URL}: ${errorDetail}. Please check if the backend is running and CORS is allowed.`,
+      0
+    );
+  }
 
   let data: unknown = null;
   try {

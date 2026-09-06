@@ -3,6 +3,8 @@ import healthRoutes from './health.routes';
 import authRoutes from './auth.routes';
 import dashboardRoutes from './dashboard.routes';
 import donorRoutes from './donor.routes';
+import bloodBankRoutes from './bloodBank.routes';
+import hospitalRoutes from './hospital.routes';
 
 const router = Router();
 
@@ -17,6 +19,14 @@ router.use('/dashboard', dashboardRoutes);
 
 // Mount donor routes under /donor (accessed via /api/donor from app.ts)
 router.use('/donor', donorRoutes);
+
+// Mount blood-banks routes under /blood-banks and /blood-bank
+router.use('/blood-banks', bloodBankRoutes);
+router.use('/blood-bank', bloodBankRoutes);
+
+// Mount hospital routes under /hospital and /hospitals
+router.use('/hospital', hospitalRoutes);
+router.use('/hospitals', hospitalRoutes);
 
 export default router;
 

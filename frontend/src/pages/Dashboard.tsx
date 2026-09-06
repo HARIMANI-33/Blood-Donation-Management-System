@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type FormEvent } from 'react';
+import { useState, useEffect, useCallback, useRef, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Droplet,
@@ -59,15 +59,19 @@ const Dashboard = () => {
   const [donationCount, setDonationCount] = useState<number>(0);
   const [eligibility, setEligibility] = useState<EligibilityStatus | null>(null);
   const [bloodBanks, setBloodBanks] = useState<BloodBank[]>([]);
+  const [allBloodBanks, setAllBloodBanks] = useState<BloodBank[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [donations, setDonations] = useState<DonationRecord[]>([]);
 
-  // City filter for donation centers modal (defaults to donor's registered city)
-  const [centerCityFilter, setCenterCityFilter] = useState<string>(user?.city || '');
+  // Search/City filter for donation centers modal (defaults to empty to show all registered centers)
+  const [centerCityFilter, setCenterCityFilter] = useState<string>('');
   const [isSearchingCenters, setIsSearchingCenters] = useState(false);
 
   // Booking form state
   const [selectedBankId, setSelectedBankId] = useState('');
+  const [centerSelectionError, setCenterSelectionError] = useState(false);
+  const [selectionPulse, setSelectionPulse] = useState(false);
+  const centerSelectRef = useRef<HTMLDivElement>(null);
   const [appointmentDate, setAppointmentDate] = useState('');
   const [appointmentTime, setAppointmentTime] = useState('');
   const [appointmentNotes, setAppointmentNotes] = useState('');
@@ -79,18 +83,21 @@ const Dashboard = () => {
   const donorName = user?.name ? user.name.toUpperCase() : 'DONOR';
   const greetingPrefix = isNewRegistration ? 'Welcome,' : 'Welcome back,';
 
-  // Function to load blood banks filtered by city
+  // Function to load blood banks filtered by search keyword or city
   const loadBloodBanks = useCallback(
-    async (city?: string) => {
+    async (searchTerm?: string) => {
       if (!token) return;
       setIsSearchingCenters(true);
       try {
-        const res = await fetchBloodBanks(token, city);
+        const res = await fetchBloodBanks(token, searchTerm);
         setBloodBanks(res.data.bloodBanks);
+        if (!searchTerm) {
+          setAllBloodBanks(res.data.bloodBanks);
+        }
         if (res.data.bloodBanks.length > 0) {
           setSelectedBankId((prev) => {
             const exists = res.data.bloodBanks.some((b) => b.id === prev);
-            return exists ? prev : res.data.bloodBanks[0].id;
+            return exists ? prev : '';
           });
         }
       } catch {
@@ -131,25 +138,52 @@ const Dashboard = () => {
     fetchDonorDonations(token)
       .then((res) => setDonations(res.data.donations))
       .catch(() => {});
+
+    // Ensure all blood banks are loaded for booking dropdown
+    fetchBloodBanks(token)
+      .then((res) => setAllBloodBanks(res.data.bloodBanks))
+      .catch(() => {});
   }, [token]);
 
   // Today in YYYY-MM-DD for min date
   const todayStr = new Date().toISOString().split('T')[0];
+
+  // If donor is in mandatory recovery period, the earliest booking date allowed is nextEligibleDate
+  const minBookingDate =
+    eligibility && !eligibility.isEligible && eligibility.nextEligibleDate && eligibility.nextEligibleDate > todayStr
+      ? eligibility.nextEligibleDate
+      : todayStr;
 
   const handleBookAppointment = async (e: FormEvent) => {
     e.preventDefault();
     if (!token) return;
     setBookingError(null);
     setBookingSuccess(null);
+    setCenterSelectionError(false);
 
     if (!selectedBankId) {
-      setBookingError('Please select a blood bank facility.');
+      setCenterSelectionError(true);
+      setSelectionPulse(true);
+      setBookingError('Please select a donation center / organization before booking.');
+      centerSelectRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => setSelectionPulse(false), 2000);
       return;
     }
     if (!appointmentDate) {
       setBookingError('Please choose an appointment date.');
       return;
     }
+
+    // Check 90-day whole blood recovery waiting period
+    if (eligibility && !eligibility.isEligible && eligibility.nextEligibleDate && appointmentDate < eligibility.nextEligibleDate) {
+      const prevDateFormatted = formatDate(eligibility.lastDonationDate);
+      const nextDateFormatted = formatDate(eligibility.nextEligibleDate);
+      setBookingError(
+        `Appointment booking restricted: You cannot schedule an appointment before your next eligible date (${nextDateFormatted}). Your previous donation was completed on ${prevDateFormatted}. Please choose ${nextDateFormatted} or a later date.`
+      );
+      return;
+    }
+
     if (!appointmentTime) {
       setBookingError('Please select an appointment time slot.');
       return;
@@ -159,8 +193,10 @@ const Dashboard = () => {
     try {
       const res = await bookAppointment(token, {
         bloodBankId: selectedBankId,
+        organizationId: selectedBankId,
         appointmentDate,
         appointmentTime,
+        bloodGroup: user?.bloodGroup || undefined,
         notes: appointmentNotes.trim() || undefined
       });
 
@@ -306,6 +342,64 @@ const Dashboard = () => {
           >
             Manage Appointment
           </button>
+        </section>
+      )}
+
+      {/* Recovery Waiting Period Banner on Dashboard (if within 90-day waiting period) */}
+      {eligibility && !eligibility.isEligible && eligibility.lastDonationDate && (
+        <section
+          style={{
+            background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
+            border: '1.5px solid #fcd34d',
+            borderRadius: '12px',
+            padding: '1rem 1.25rem',
+            marginBottom: '1.75rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '1rem',
+            flexWrap: 'wrap',
+            boxShadow: '0 2px 8px rgba(217, 119, 6, 0.08)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+            <div
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '10px',
+                background: '#d97706',
+                color: 'white',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}
+            >
+              <Clock size={20} />
+            </div>
+            <div>
+              <h4 style={{ fontSize: '0.98rem', fontWeight: 700, color: '#92400e', margin: 0 }}>
+                Rest & Recovery Period Active
+              </h4>
+              <p style={{ fontSize: '0.88rem', color: '#78350f', margin: '0.2rem 0 0' }}>
+                Previous Donation: <strong>{formatDate(eligibility.lastDonationDate)}</strong> &bull; Next Eligible Donation: <strong>{formatDate(eligibility.nextEligibleDate)}</strong> ({eligibility.daysRemaining} {eligibility.daysRemaining === 1 ? 'day' : 'days'} remaining)
+              </p>
+            </div>
+          </div>
+          <span
+            style={{
+              padding: '0.4rem 0.85rem',
+              background: '#ffffff',
+              border: '1px solid #fde68a',
+              borderRadius: '9999px',
+              fontSize: '0.82rem',
+              fontWeight: 700,
+              color: '#b45309'
+            }}
+          >
+            Eligible: {formatDate(eligibility.nextEligibleDate)}
+          </span>
         </section>
       )}
 
@@ -488,7 +582,7 @@ const Dashboard = () => {
                 />
                 <input
                   type="text"
-                  placeholder="Filter by city (e.g. Chennai, Bengaluru, Coimbatore, Madurai)..."
+                  placeholder="Search by blood bank name, city, or address..."
                   value={centerCityFilter}
                   onChange={(e) => setCenterCityFilter(e.target.value)}
                   className="form-input"
@@ -496,11 +590,27 @@ const Dashboard = () => {
                 />
               </div>
 
-              {/* Quick City Pills */}
+              {/* Quick Filter Pills */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600, marginRight: '0.2rem' }}>
-                  Quick Cities:
+                  Quick Filter:
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setCenterCityFilter('')}
+                  style={{
+                    padding: '0.25rem 0.65rem',
+                    borderRadius: '9999px',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    border: '1px solid #cbd5e1',
+                    background: centerCityFilter === '' ? '#1e293b' : '#f8fafc',
+                    color: centerCityFilter === '' ? '#ffffff' : '#475569',
+                    cursor: 'pointer'
+                  }}
+                >
+                  All Centers ({allBloodBanks.length || bloodBanks.length})
+                </button>
                 {user?.city && (
                   <button
                     type="button"
@@ -715,6 +825,9 @@ const Dashboard = () => {
                             type="button"
                             onClick={() => {
                               setSelectedBankId(bank.id);
+                              setCenterSelectionError(false);
+                              setSelectionPulse(false);
+                              setBookingError(null);
                               const formEl = document.getElementById('appointment-booking-section');
                               formEl?.scrollIntoView({ behavior: 'smooth' });
                             }}
@@ -760,6 +873,79 @@ const Dashboard = () => {
                 Pick your preferred date and time slot for your selected donation center:
               </p>
 
+              {/* Eligibility & Next Donation Date Notice Banner */}
+              {eligibility?.lastDonationDate && (
+                <div
+                  style={{
+                    marginBottom: '1.25rem',
+                    padding: '1rem 1.25rem',
+                    borderRadius: '10px',
+                    border: eligibility.isEligible ? '1.5px solid #86efac' : '1.5px solid #fcd34d',
+                    backgroundColor: eligibility.isEligible ? '#f0fdf4' : '#fffbeb',
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                    {eligibility.isEligible ? (
+                      <CheckCircle2 size={22} style={{ color: '#16a34a', flexShrink: 0, marginTop: '2px' }} />
+                    ) : (
+                      <AlertCircle size={22} style={{ color: '#d97706', flexShrink: 0, marginTop: '2px' }} />
+                    )}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.95rem', color: eligibility.isEligible ? '#15803d' : '#92400e' }}>
+                        {eligibility.isEligible
+                          ? '✓ Fully Eligible for Blood Donation'
+                          : '⚠️ Recovery Waiting Period Active — Blood Donation Restricted'}
+                      </div>
+                      <p style={{ fontSize: '0.84rem', color: eligibility.isEligible ? '#166534' : '#78350f', margin: '0.25rem 0 0.65rem' }}>
+                        {eligibility.isEligible
+                          ? 'You have completed the required 90-day recovery period since your previous donation and are fully eligible to donate blood again.'
+                          : 'To protect your health, whole blood donors must observe a mandatory 90-day recovery interval between donations. The system will not allow booking before your next eligible date.'}
+                      </p>
+
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                          gap: '0.65rem',
+                          background: 'rgba(255,255,255,0.85)',
+                          padding: '0.65rem 0.85rem',
+                          borderRadius: '8px',
+                          fontSize: '0.82rem'
+                        }}
+                      >
+                        <div>
+                          <span style={{ display: 'block', color: '#64748b', fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 600 }}>
+                            Previous Donation Date
+                          </span>
+                          <strong style={{ color: '#0f172a', fontSize: '0.92rem' }}>
+                            {formatDate(eligibility.lastDonationDate)}
+                          </strong>
+                        </div>
+                        <div>
+                          <span style={{ display: 'block', color: '#64748b', fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 600 }}>
+                            Next Eligible Date
+                          </span>
+                          <strong style={{ color: eligibility.isEligible ? '#15803d' : '#b45309', fontSize: '0.92rem' }}>
+                            {formatDate(eligibility.nextEligibleDate)}
+                          </strong>
+                        </div>
+                        {!eligibility.isEligible && eligibility.daysRemaining > 0 && (
+                          <div>
+                            <span style={{ display: 'block', color: '#64748b', fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 600 }}>
+                              Waiting Period Remaining
+                            </span>
+                            <strong style={{ color: '#b45309', fontSize: '0.92rem' }}>
+                              {eligibility.daysRemaining} {eligibility.daysRemaining === 1 ? 'day' : 'days'}
+                            </strong>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {bookingSuccess && (
                 <div
                   style={{
@@ -797,36 +983,187 @@ const Dashboard = () => {
               )}
 
               {/* Appointment Booking Form */}
-              <form onSubmit={handleBookAppointment} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
-                <label style={{ fontSize: '0.88rem', fontWeight: 600, color: '#334155' }}>
-                  Selected Donation Center <span style={{ color: '#dc2626' }}>*</span>
-                  <select
-                    value={selectedBankId}
-                    onChange={(e) => setSelectedBankId(e.target.value)}
-                    className="form-input"
-                    style={{ marginTop: '0.35rem' }}
-                    required
-                  >
-                    {bloodBanks.map((bank) => (
-                      <option key={bank.id} value={bank.id}>
-                        {bank.name} &bull; {bank.city} ({bank.operating_hours || '09:00 AM - 05:00 PM'})
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              <form onSubmit={handleBookAppointment} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {/* SELECTED DONATION CENTER DISPLAY & SELECTOR */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.88rem', fontWeight: 600, color: '#334155', marginBottom: '0.35rem' }}>
+                    Selected Donation Center <span style={{ color: '#dc2626' }}>*</span>
+                  </label>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  {(() => {
+                    const availableCenters = allBloodBanks.length > 0 ? allBloodBanks : bloodBanks;
+                    const selectedBank = availableCenters.find((b) => b.id === selectedBankId);
+                    return selectedBank ? (
+                      <div
+                        ref={centerSelectRef}
+                        className={selectionPulse ? 'input-invalid-pulse' : ''}
+                        style={{
+                          padding: '1.1rem 1.25rem',
+                          background: '#ffffff',
+                          borderRadius: '10px',
+                          border: '1.5px solid #cbd5e1',
+                          boxShadow: 'var(--shadow-sm)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.5rem'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <div>
+                            <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--primary-600)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                              Confirmed Donation Location
+                            </div>
+                            <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', margin: '0.15rem 0' }}>
+                              {selectedBank.name}
+                            </div>
+                          </div>
+                          <span
+                            style={{
+                              fontSize: '0.74rem',
+                              fontWeight: 700,
+                              padding: '0.2rem 0.65rem',
+                              borderRadius: '9999px',
+                              background: selectedBank.type === 'HOSPITAL' ? '#dbeafe' : '#fee2e2',
+                              color: selectedBank.type === 'HOSPITAL' ? '#1e40af' : '#991b1b',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.35rem'
+                            }}
+                          >
+                            {selectedBank.type === 'HOSPITAL' ? <Hospital size={13} /> : <Building2 size={13} />}
+                            {selectedBank.type === 'HOSPITAL' ? 'Hospital Unit' : 'Certified Blood Bank'}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.25rem', fontSize: '0.85rem', color: '#475569', marginTop: '0.15rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <MapPin size={14} style={{ color: 'var(--primary-600)', flexShrink: 0 }} />
+                            <span>{selectedBank.city} &bull; {selectedBank.address}</span>
+                          </div>
+                          {selectedBank.phone && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                              <PhoneIcon size={14} style={{ color: '#16a34a', flexShrink: 0 }} />
+                              <span>{selectedBank.phone}</span>
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <Clock size={14} style={{ color: '#64748b', flexShrink: 0 }} />
+                            <span>{selectedBank.operating_hours || '08:00 AM - 08:00 PM'}</span>
+                          </div>
+                        </div>
+
+                        {/* Switch Center dropdown */}
+                        <div style={{ marginTop: '0.4rem', borderTop: '1px solid #f1f5f9', paddingTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 500 }}>Change Center:</span>
+                          <select
+                            value={selectedBankId}
+                            onChange={(e) => {
+                              setSelectedBankId(e.target.value);
+                              setCenterSelectionError(false);
+                              setSelectionPulse(false);
+                              setBookingError(null);
+                            }}
+                            className="form-input"
+                            style={{ fontSize: '0.82rem', padding: '0.35rem 0.65rem', maxWidth: '380px' }}
+                          >
+                            {(allBloodBanks.length > 0 ? allBloodBanks : bloodBanks).map((bank) => (
+                              <option key={bank.id} value={bank.id}>
+                                {bank.name} &bull; {bank.city}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        ref={centerSelectRef}
+                        className={selectionPulse ? 'input-invalid-pulse' : ''}
+                        style={{
+                          padding: '1.25rem',
+                          borderRadius: '10px',
+                          border: centerSelectionError ? '2px solid #dc2626' : '2px dashed #cbd5e1',
+                          backgroundColor: centerSelectionError ? '#fef2f2' : '#f8fafc',
+                          textAlign: 'center'
+                        }}
+                      >
+                        <Building2 size={26} style={{ color: centerSelectionError ? '#dc2626' : '#94a3b8', margin: '0 auto 0.4rem' }} />
+                        <div style={{ fontWeight: 700, fontSize: '0.95rem', color: centerSelectionError ? '#991b1b' : '#334155' }}>
+                          No Donation Center Selected
+                        </div>
+                        <p style={{ fontSize: '0.82rem', color: '#64748b', margin: '0.25rem 0 0.85rem' }}>
+                          Select an organization from the centers list above or choose one from the menu below:
+                        </p>
+                        <select
+                          value={selectedBankId}
+                          onChange={(e) => {
+                            setSelectedBankId(e.target.value);
+                            setCenterSelectionError(false);
+                            setSelectionPulse(false);
+                            setBookingError(null);
+                          }}
+                          className="form-input"
+                          style={{
+                            maxWidth: '420px',
+                            margin: '0 auto',
+                            borderColor: centerSelectionError ? '#dc2626' : undefined
+                          }}
+                        >
+                          <option value="">-- Choose a Donation Center / Organization --</option>
+                          {(allBloodBanks.length > 0 ? allBloodBanks : bloodBanks).map((bank) => (
+                            <option key={bank.id} value={bank.id}>
+                              {bank.name} &bull; {bank.city} ({bank.operating_hours || '08:00 AM - 08:00 PM'})
+                            </option>
+                          ))}
+                        </select>
+                        {centerSelectionError && (
+                          <div style={{ color: '#dc2626', fontSize: '0.82rem', fontWeight: 600, marginTop: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem' }}>
+                            <AlertCircle size={14} /> Please select an organization / donation center before booking.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+                  <label style={{ fontSize: '0.88rem', fontWeight: 600, color: '#334155' }}>
+                    Donor Blood Group
+                    <div
+                      style={{
+                        marginTop: '0.35rem',
+                        padding: '0.6rem 0.85rem',
+                        background: '#fef2f2',
+                        border: '1px solid #fecaca',
+                        borderRadius: '8px',
+                        color: '#991b1b',
+                        fontWeight: 700,
+                        fontSize: '0.9rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.4rem'
+                      }}
+                    >
+                      <Droplet size={15} style={{ color: '#dc2626' }} />
+                      <span>{user?.bloodGroup || 'To be recorded'}</span>
+                    </div>
+                  </label>
+
                   <label style={{ fontSize: '0.88rem', fontWeight: 600, color: '#334155' }}>
                     Appointment Date <span style={{ color: '#dc2626' }}>*</span>
                     <input
                       type="date"
-                      min={todayStr}
+                      min={minBookingDate}
                       value={appointmentDate}
                       onChange={(e) => setAppointmentDate(e.target.value)}
                       className="form-input"
                       style={{ marginTop: '0.35rem' }}
                       required
                     />
+                    {eligibility && !eligibility.isEligible && eligibility.nextEligibleDate && (
+                      <span style={{ display: 'block', marginTop: '0.25rem', fontSize: '0.76rem', color: '#b45309', fontWeight: 600 }}>
+                        Earliest available: {formatDate(eligibility.nextEligibleDate)}
+                      </span>
+                    )}
                   </label>
 
                   <label style={{ fontSize: '0.88rem', fontWeight: 600, color: '#334155' }}>

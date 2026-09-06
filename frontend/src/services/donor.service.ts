@@ -25,10 +25,10 @@ export const updateDonorProfile = (token: string, input: UpdateProfileInput): Pr
   apiRequest<DonorProfileResponse>('/donor/profile', { method: 'PUT', token, body: input });
 
 /**
- * Fetch certified blood banks / donation centers, optionally filtered by city.
+ * Fetch certified blood banks / donation centers, optionally filtered by name, city, or address.
  */
-export const fetchBloodBanks = (token: string, city?: string): Promise<BloodBanksResponse> => {
-  const query = city && city.trim() ? `?city=${encodeURIComponent(city.trim())}` : '';
+export const fetchBloodBanks = (token: string, searchOrCity?: string): Promise<BloodBanksResponse> => {
+  const query = searchOrCity && searchOrCity.trim() ? `?search=${encodeURIComponent(searchOrCity.trim())}` : '';
   return apiRequest<BloodBanksResponse>(`/donor/blood-banks${query}`, { token });
 };
 
@@ -36,7 +36,15 @@ export const fetchBloodBanks = (token: string, city?: string): Promise<BloodBank
  * Book a new donation appointment.
  */
 export const bookAppointment = (token: string, input: BookAppointmentInput): Promise<BookAppointmentResponse> =>
-  apiRequest<BookAppointmentResponse>('/donor/appointments', { method: 'POST', token, body: input });
+  apiRequest<BookAppointmentResponse>('/donor/appointments', {
+    method: 'POST',
+    token,
+    body: {
+      ...input,
+      organizationId: input.organizationId || input.bloodBankId,
+      bloodBankId: input.bloodBankId || input.organizationId
+    }
+  });
 
 /**
  * Fetch all appointments booked by the donor.

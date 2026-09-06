@@ -81,10 +81,15 @@ const Login = () => {
       return;
     }
 
-    setIsSubmitting(true);
     try {
       await login({ email: email.trim(), password });
-      navigate('/dashboard');
+      const raw = localStorage.getItem('bloodbank_auth');
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed?.user?.role === 'blood_bank') {
+        navigate('/blood-bank/dashboard');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
     } finally {
