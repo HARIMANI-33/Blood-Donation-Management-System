@@ -242,7 +242,13 @@ const Register = () => {
       });
       navigate('/dashboard');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+      const msg = err instanceof ApiError ? err.message : 'Something went wrong. Please try again.';
+      setError(msg);
+      if (msg.toLowerCase().includes('phone') || msg.toLowerCase().includes('already in use')) {
+        focusAndScroll(phoneRef);
+      } else if (msg.toLowerCase().includes('email')) {
+        focusAndScroll(emailRef);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -321,10 +327,20 @@ const Register = () => {
                 autoComplete="off"
                 required
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="form-input register-input"
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (error && error.toLowerCase().includes('email')) {
+                    setError(null);
+                  }
+                }}
+                className={`form-input register-input ${error && error.toLowerCase().includes('email') ? 'input-box-error' : ''}`}
                 placeholder="example@gmail.com"
               />
+              {error && error.toLowerCase().includes('email') && (
+                <span className="register-field-error" style={{ color: '#ef4444', fontSize: '0.8rem', marginTop: '0.25rem', display: 'block', fontWeight: 500 }}>
+                  {error}
+                </span>
+              )}
             </label>
 
             {/* 3. Phone Number */}
@@ -337,10 +353,20 @@ const Register = () => {
                 autoComplete="off"
                 required
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="form-input register-input"
+                onChange={(e) => {
+                  setPhone(e.target.value);
+                  if (error && (error.toLowerCase().includes('phone') || error.toLowerCase().includes('already in use'))) {
+                    setError(null);
+                  }
+                }}
+                className={`form-input register-input ${error && (error.toLowerCase().includes('phone') || (error.toLowerCase().includes('already in use') && !error.toLowerCase().includes('email'))) ? 'input-box-error' : ''}`}
                 placeholder="+91 90000 00000"
               />
+              {error && (error.toLowerCase().includes('phone') || (error.toLowerCase().includes('already in use') && !error.toLowerCase().includes('email'))) && (
+                <span className="register-field-error" style={{ color: '#ef4444', fontSize: '0.8rem', marginTop: '0.25rem', display: 'block', fontWeight: 500 }}>
+                  {error}
+                </span>
+              )}
             </label>
 
             {/* 4. Password */}
