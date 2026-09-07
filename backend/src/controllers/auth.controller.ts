@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import { createUser, findUserByEmail, findUserById, toPublicUser, BloodGroup, UserRole } from '../models/user.model';
+import { createUser, findUserByEmail, findUserByPhone, findUserById, toPublicUser, BloodGroup, UserRole } from '../models/user.model';
 import { signToken } from '../utils/jwt';
 import { AuthenticatedRequest } from '../middleware/auth';
 import { config } from '../config/environment';
@@ -54,6 +54,14 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     if (existing) {
       res.status(409).json({ success: false, message: 'An account with this email already exists' });
       return;
+    }
+
+    if (phone && typeof phone === 'string' && phone.trim().length > 0) {
+      const existingPhone = await findUserByPhone(phone.trim());
+      if (existingPhone) {
+        res.status(409).json({ success: false, message: 'This phone number is already in use. Please use a different phone number.' });
+        return;
+      }
     }
 
     const passwordHash = await bcrypt.hash(password, 10);

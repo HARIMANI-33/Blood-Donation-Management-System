@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import pool, { query } from '../config/database';
-import { findUserByEmail, findUserById, BloodGroup } from '../models/user.model';
+import { findUserByEmail, findUserByPhone, findUserById, BloodGroup } from '../models/user.model';
 import {
   findHospitalById,
   findHospitalByUserId,
@@ -100,6 +100,12 @@ export const registerHospital = async (req: Request, res: Response): Promise<voi
     }
     if (!orgAddress || orgAddress.length < 5) {
       res.status(400).json({ success: false, message: 'Full Address is required' });
+      return;
+    }
+
+    const existingPhone = await findUserByPhone(orgPhone);
+    if (existingPhone) {
+      res.status(409).json({ success: false, message: 'This phone number is already in use. Please use a different phone number.' });
       return;
     }
 
@@ -309,6 +315,14 @@ export const updateHospitalProfileHandler = async (
       emergencyContact,
       hospitalType
     } = req.body ?? {};
+
+    if (phone && String(phone).trim().length > 0) {
+      const existingPhone = await findUserByPhone(String(phone).trim(), req.user?.userId);
+      if (existingPhone) {
+        res.status(409).json({ success: false, message: 'This phone number is already in use. Please use a different phone number.' });
+        return;
+      }
+    }
 
     const updated = await updateHospitalProfile(hospital.id, {
       name: (hospitalName ?? name)?.trim(),

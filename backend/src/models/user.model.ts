@@ -43,6 +43,104 @@ export const findUserById = async (id: string): Promise<User | null> => {
 };
 
 /**
+ * Find a user or facility by phone number across users, blood_banks, and hospitals.
+ * Compares both exact trimmed phone and normalized digits to prevent duplicates.
+ */
+export const findUserByPhone = async (phone: string, excludeUserId?: string): Promise<User | null> => {
+  const trimmed = phone ? phone.trim() : '';
+  if (!trimmed) return null;
+  const digitsOnly = trimmed.replace(/\D/g, '');
+  const last10 = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
+
+  // 1. Check users table
+  let sqlUsers = `
+    SELECT * FROM users
+    WHERE phone IS NOT NULL AND phone != ''
+      AND (
+        phone = $1
+        OR regexp_replace(phone, '\\D', '', 'g') = $2
+        ${last10.length >= 7 ? "OR regexp_replace(phone, '\\D', '', 'g') LIKE '%' || $3" : ''}
+      )
+  `;
+  const paramsUsers: unknown[] = [trimmed, digitsOnly];
+  if (last10.length >= 7) {
+    paramsUsers.push(last10);
+  }
+  if (excludeUserId) {
+    sqlUsers += ` AND id != $${paramsUsers.length + 1}`;
+    paramsUsers.push(excludeUserId);
+  }
+  sqlUsers += ' LIMIT 1';
+
+  const userResult = await query(sqlUsers, paramsUsers);
+  if (userResult.rows[0]) {
+    return userResult.rows[0];
+  }
+
+  // 2. Check blood_banks table
+  let sqlBB = `
+    SELECT id, user_id, name, phone FROM blood_banks
+    WHERE phone IS NOT NULL AND phone != ''
+      AND (
+        phone = $1
+        OR regexp_replace(phone, '\\D', '', 'g') = $2
+        ${last10.length >= 7 ? "OR regexp_replace(phone, '\\D', '', 'g') LIKE '%' || $3" : ''}
+      )
+  `;
+  const paramsBB: unknown[] = [trimmed, digitsOnly];
+  if (last10.length >= 7) {
+    paramsBB.push(last10);
+  }
+  if (excludeUserId) {
+    sqlBB += ` AND (user_id IS NULL OR user_id != $${paramsBB.length + 1})`;
+    paramsBB.push(excludeUserId);
+  }
+  sqlBB += ' LIMIT 1';
+
+  const bbResult = await query(sqlBB, paramsBB);
+  if (bbResult.rows[0]) {
+    return {
+      id: bbResult.rows[0].user_id || bbResult.rows[0].id,
+      name: bbResult.rows[0].name,
+      phone: bbResult.rows[0].phone,
+      role: 'blood_bank'
+    } as User;
+  }
+
+  // 3. Check hospitals table
+  let sqlHosp = `
+    SELECT id, user_id, name, phone FROM hospitals
+    WHERE phone IS NOT NULL AND phone != ''
+      AND (
+        phone = $1
+        OR regexp_replace(phone, '\\D', '', 'g') = $2
+        ${last10.length >= 7 ? "OR regexp_replace(phone, '\\D', '', 'g') LIKE '%' || $3" : ''}
+      )
+  `;
+  const paramsHosp: unknown[] = [trimmed, digitsOnly];
+  if (last10.length >= 7) {
+    paramsHosp.push(last10);
+  }
+  if (excludeUserId) {
+    sqlHosp += ` AND (user_id IS NULL OR user_id != $${paramsHosp.length + 1})`;
+    paramsHosp.push(excludeUserId);
+  }
+  sqlHosp += ' LIMIT 1';
+
+  const hospResult = await query(sqlHosp, paramsHosp);
+  if (hospResult.rows[0]) {
+    return {
+      id: hospResult.rows[0].user_id || hospResult.rows[0].id,
+      name: hospResult.rows[0].name,
+      phone: hospResult.rows[0].phone,
+      role: 'hospital'
+    } as User;
+  }
+
+  return null;
+};
+
+/**
  * Insert a new user row and return the created record.
  */
 export const createUser = async (input: CreateUserInput): Promise<User> => {

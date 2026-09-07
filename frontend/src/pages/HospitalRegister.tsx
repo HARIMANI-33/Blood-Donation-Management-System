@@ -217,10 +217,23 @@ const HospitalRegister = () => {
         setApiError('Registration succeeded but session could not be established. Please login.');
       }
     } catch (err) {
-      if (err instanceof ApiError) {
-        setApiError(err.message);
-      } else {
-        setApiError('Registration failed. Please verify your details and try again.');
+      const errorMsg = err instanceof ApiError ? err.message : 'Registration failed. Please verify your details and try again.';
+      setApiError(errorMsg);
+
+      if (errorMsg.toLowerCase().includes('phone') || errorMsg.toLowerCase().includes('already in use')) {
+        setFieldErrors(prev => ({ ...prev, phone: errorMsg }));
+        setPulseField('phone');
+        if (phoneRef.current) {
+          phoneRef.current.focus();
+          phoneRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      } else if (errorMsg.toLowerCase().includes('email')) {
+        setFieldErrors(prev => ({ ...prev, officialEmail: errorMsg }));
+        setPulseField('officialEmail');
+        if (emailRef.current) {
+          emailRef.current.focus();
+          emailRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
       }
     } finally {
       setIsSubmitting(false);

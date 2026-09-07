@@ -39,6 +39,7 @@ export const initDatabase = async (): Promise<void> => {
     await query('CREATE INDEX IF NOT EXISTS idx_users_blood_group ON users(blood_group)');
     await query('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)');
     await query('CREATE INDEX IF NOT EXISTS idx_users_city ON users(city)');
+    await query('CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)');
 
     // 3. Ensure blood_banks table with user_id, type, and donation capability
     await query(`

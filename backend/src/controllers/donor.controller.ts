@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth';
-import { findUserById, updateUserProfile, toPublicUser, BloodGroup } from '../models/user.model';
+import { findUserById, findUserByPhone, updateUserProfile, toPublicUser, BloodGroup } from '../models/user.model';
 import { findAllBloodBanks, findBloodBankById } from '../models/bloodBank.model';
 import {
   createAppointment,
@@ -97,6 +97,11 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response): P
       const digitsOnly = String(phone).replace(/\D/g, '');
       if (digitsOnly.length < 10) {
         res.status(400).json({ success: false, message: 'Phone number must be at least 10 digits' });
+        return;
+      }
+      const existingPhone = await findUserByPhone(String(phone), userId);
+      if (existingPhone) {
+        res.status(409).json({ success: false, message: 'This phone number is already in use. Please use a different phone number.' });
         return;
       }
     }

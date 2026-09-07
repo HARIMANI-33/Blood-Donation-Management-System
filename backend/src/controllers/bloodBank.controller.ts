@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import pool, { query } from '../config/database';
-import { createUser, findUserByEmail, findUserById, BloodGroup } from '../models/user.model';
+import { createUser, findUserByEmail, findUserByPhone, findUserById, BloodGroup } from '../models/user.model';
 import {
   findBloodBankByUserId,
   findBloodBankById,
@@ -87,6 +87,12 @@ export const registerBloodBank = async (req: Request, res: Response): Promise<vo
     }
     if (!orgPhone || orgPhone.length < 7) {
       res.status(400).json({ success: false, message: 'A valid phone number is required' });
+      return;
+    }
+
+    const existingPhone = await findUserByPhone(orgPhone);
+    if (existingPhone) {
+      res.status(409).json({ success: false, message: 'This phone number is already in use. Please use a different phone number.' });
       return;
     }
 
@@ -221,6 +227,14 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response): P
       openingHours,
       email
     } = req.body ?? {};
+
+    if (phone && typeof phone === 'string' && phone.trim().length > 0) {
+      const existingPhone = await findUserByPhone(phone.trim(), req.user?.userId);
+      if (existingPhone) {
+        res.status(409).json({ success: false, message: 'This phone number is already in use. Please use a different phone number.' });
+        return;
+      }
+    }
 
     const updated = await updateBloodBankProfile(bloodBank.id, {
       name: organizationName ?? name,

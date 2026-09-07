@@ -234,7 +234,23 @@ const BloodBankRegister = () => {
       } else if (typeof err === 'string') {
         errorMsg = err;
       }
-      setApiError(`Registration failed: ${errorMsg}`);
+      setApiError(errorMsg);
+
+      if (errorMsg.toLowerCase().includes('phone') || errorMsg.toLowerCase().includes('already in use')) {
+        setFieldErrors(prev => ({ ...prev, phone: errorMsg }));
+        setPulseField('phone');
+        if (phoneRef.current) {
+          phoneRef.current.focus();
+          phoneRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      } else if (errorMsg.toLowerCase().includes('email')) {
+        setFieldErrors(prev => ({ ...prev, email: errorMsg }));
+        setPulseField('email');
+        if (emailRef.current) {
+          emailRef.current.focus();
+          emailRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
     } finally {
       setIsSubmitting(false);
     }
