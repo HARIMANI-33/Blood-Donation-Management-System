@@ -1,4 +1,28 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+/**
+ * Normalizes API base URL:
+ * - Trims whitespace and trailing slashes.
+ * - Ensures the `/api` route prefix is present if omitted.
+ */
+const normalizeApiUrl = (url: string): string => {
+  let trimmed = url.trim().replace(/\/+$/, '');
+  if (!trimmed.endsWith('/api')) {
+    trimmed += '/api';
+  }
+  return trimmed;
+};
+
+const DEFAULT_PROD_API_URL = 'https://blood-donation-management-system-fzrt.onrender.com/api';
+const DEFAULT_DEV_API_URL = 'http://localhost:5000/api';
+
+// Priority:
+// 1. Explicit VITE_API_URL environment variable (from .env, .env.production, or Vercel Environment Variables)
+// 2. If running in production mode (import.meta.env.PROD), use the live Render backend URL
+// 3. Otherwise in development mode, use localhost:5000/api
+const RAW_API_URL =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? DEFAULT_PROD_API_URL : DEFAULT_DEV_API_URL);
+
+const API_URL = normalizeApiUrl(RAW_API_URL);
 
 export class ApiError extends Error {
   status: number;
