@@ -44,9 +44,9 @@ app.use(errorHandler);
 import { initDatabase } from './config/initDb';
 
 // Start server
-const PORT = config.port;
+const PORT = Number(process.env.PORT) || 5000;
 app.listen(PORT, async () => {
-  console.log(`[Server] Blood Bank API is running on http://localhost:${PORT}`);
+  console.log(`[Server] Blood Bank API is running on port ${PORT}`);
   console.log(`[Server] Environment: ${config.nodeEnv}`);
   await initDatabase();
 });
