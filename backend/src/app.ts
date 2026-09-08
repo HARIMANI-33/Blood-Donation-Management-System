@@ -13,13 +13,17 @@ app.use(cors({
     if (!origin) return callback(null, true);
     if (
       origin === config.clientUrl ||
+      origin === 'https://blood-donation-management-system-nu.vercel.app' ||
+      /^https:\/\/[a-zA-Z0-9_.-]+\.vercel\.app$/.test(origin) ||
       /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
     ) {
       return callback(null, true);
     }
     return callback(null, false);
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
